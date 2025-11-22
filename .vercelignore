@@ -1,0 +1,33 @@
+# Tests
+tests/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Development
+.venv/
+venv/
+env/
+ENV/
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# Logs (if any)
+logs/
+*.log

@@ -20,9 +20,6 @@
       "dest": "/frontend/$1"
     }
   ],
-  "env": {
-    "VERCEL_ENV": "production"
-  },
   "functions": {
     "api/index.py": {
       "memory": 1024,

@@ -1,11 +1,14 @@
+# IslamicGuideAI Backend Requirements
+# Python dependencies for FastAPI backend and Vercel deployment
+
 # Web Framework
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 
-# HTTP Client
+# HTTP Client - CRITICAL: Used in services.py
 httpx==0.27.2
 
-# Google AI
+# Google Gemini AI
 google-generativeai==0.8.3
 
 # Environment Variables

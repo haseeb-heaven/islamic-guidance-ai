@@ -3,52 +3,58 @@ Vercel Serverless Function Entry Point
 Handles all API requests for the Islamic Guidance AI application
 """
 
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 import sys
 import os
 from pathlib import Path
-import logging
 
-# Configure logging for Vercel
+# CRITICAL: Add parent directory BEFORE any imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Configure basic logging FIRST
+import logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True
 )
 logger = logging.getLogger(__name__)
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Log startup
+logger.info("=" * 60)
+logger.info("🚀 Vercel Function Starting...")
+logger.info(f"📍 Python Path: {sys.path}")
+logger.info(f"📍 Working Dir: {os.getcwd()}")
+logger.info("=" * 60)
 
-# Import backend app
+# Try to import FastAPI
+try:
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse
+    from fastapi.middleware.cors import CORSMiddleware
+    logger.info("✅ FastAPI imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import FastAPI: {e}")
+    raise
+
+# Try to import backend
 try:
     from backend.main import app as backend_app
     logger.info("✅ Backend app imported successfully")
-except ImportError as e:
+    HAS_BACKEND = True
+except Exception as e:
     logger.error(f"❌ Failed to import backend: {e}")
-    # Create minimal fallback app
-    backend_app = FastAPI()
-    
-    @backend_app.get("/")
-    async def fallback_root():
-        return {"error": "Backend failed to initialize", "details": str(e)}
+    logger.error(f"❌ Error type: {type(e).__name__}")
+    HAS_BACKEND = False
+    backend_app = None
 
-# Detect environment
-IS_VERCEL = os.getenv("VERCEL_ENV") is not None
-logger.info(f"📍 Environment: {'Vercel' if IS_VERCEL else 'Local'}")
-
-# Create main app instance
+# Create main app
 app = FastAPI(
     title="Islamic Guidance AI",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    version="1.0.0"
 )
 
-# Configure CORS
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -60,58 +66,43 @@ app.add_middleware(
 # Root endpoint
 @app.get("/")
 async def root():
-    """Root endpoint with API information"""
     return {
-        "name": "Islamic Guidance AI API",
+        "name": "Islamic Guidance AI",
         "status": "running",
-        "version": "1.0.0",
-        "environment": "vercel" if IS_VERCEL else "local",
-        "endpoints": {
-            "health": "/health",
-            "docs": "/docs",
-            "guidance": "/api/guidance",
-            "quran_search": "/api/quran/search",
-            "hadith_search": "/api/hadith/search"
-        }
+        "backend_loaded": HAS_BACKEND,
+        "version": "1.0.0"
     }
 
 # Health check
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    api_key_status = "configured" if os.getenv("GEMINI_API_KEY") else "missing"
-    
+async def health():
     return {
-        "status": "healthy",
-        "environment": "vercel" if IS_VERCEL else "local",
-        "api_key": api_key_status,
-        "timestamp": __import__("datetime").datetime.now().isoformat()
+        "status": "ok",
+        "backend": "loaded" if HAS_BACKEND else "failed",
+        "api_key": "configured" if os.getenv("GEMINI_API_KEY") else "missing"
     }
 
-# Mount backend routes
-try:
-    app.mount("/api", backend_app)
-    logger.info("✅ Backend routes mounted successfully")
-except Exception as e:
-    logger.error(f"❌ Failed to mount backend: {e}")
+# Mount backend if available
+if HAS_BACKEND and backend_app:
+    try:
+        app.mount("/api", backend_app)
+        logger.info("✅ Backend mounted at /api")
+    except Exception as e:
+        logger.error(f"❌ Failed to mount backend: {e}")
 
-# Global exception handler
+# Error handler
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle all unhandled exceptions"""
-    logger.error(f"❌ Unhandled exception: {type(exc).__name__}: {str(exc)}")
-    logger.error(f"📍 Request URL: {request.url}")
-    logger.error(f"📍 Request method: {request.method}")
-    
+async def error_handler(request: Request, exc: Exception):
+    logger.error(f"❌ Error: {type(exc).__name__}: {str(exc)}")
     return JSONResponse(
         status_code=500,
         content={
-            "error": "Internal server error",
-            "message": str(exc),
-            "type": type(exc).__name__,
-            "path": str(request.url.path)
+            "error": str(exc),
+            "type": type(exc).__name__
         }
     )
 
 # Export for Vercel
 handler = app
+
+logger.info("✅ Vercel function initialized")
