@@ -1,18 +1,5 @@
 import os
 import json
-import traceback
-import uvicorn
-import logging
-from logging.handlers import RotatingFileHandler
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from dotenv import load_dotenv
-import google.generativeai as genai
-
-# Import services
 from backend.services import search_quran, search_hadith
 
 # Load environment variables
