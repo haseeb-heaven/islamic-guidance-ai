@@ -26,6 +26,9 @@ if os.getenv("VERCEL") != "1":
         print("No .env file found, assuming environment variables are set")
 
 # --- Logging Configuration ---
+# Check if running in serverless environment (Vercel)
+IS_SERVERLESS = os.getenv("VERCEL") == "1"
+
 # Vercel does not support file system logging, so we use console logging (stdout)
 # This works for both local development and Vercel
 logging.basicConfig(
