@@ -1,8 +1,18 @@
 import os
 import json
-from backend.services import search_quran, search_hadith
+import traceback
+import uvicorn
+import logging
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Load environment variables
+from backend.services import search_quran, search_hadith
 # Load environment variables
 # Only load .env in local development
 if os.getenv("VERCEL") != "1":
