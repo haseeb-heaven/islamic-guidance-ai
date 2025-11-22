@@ -26,36 +26,13 @@ if os.getenv("VERCEL") != "1":
         print("No .env file found, assuming environment variables are set")
 
 # --- Logging Configuration ---
-# Check if running in serverless environment (Vercel)
-# Vercel sets 'VERCEL' env var to '1'
-IS_SERVERLESS = os.getenv("VERCEL") == "1"
-
-# Configure logging
-try:
-    handlers = [logging.StreamHandler()]
-    
-    # Only attempt file logging if NOT in serverless and we can write to disk
-    if not IS_SERVERLESS:
-        try:
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "backend")
-            os.makedirs(log_dir, exist_ok=True)
-            log_file = os.path.join(log_dir, "app.log")
-            handlers.append(RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5))
-        except Exception as e:
-            # If file logging fails, fallback to console only and treat as serverless-like
-            print(f"Warning: Failed to setup file logging: {e}")
-            IS_SERVERLESS = True
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=handlers
-    )
-except Exception as e:
-    # Fallback if basicConfig fails
-    print(f"Critical Error setting up logging: {e}")
-    # Ensure we have at least basic logging
-    logging.basicConfig(level=logging.INFO)
+# Vercel does not support file system logging, so we use console logging (stdout)
+# This works for both local development and Vercel
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
 logger = logging.getLogger("IslamicGuideAI")
 logger.info("Loading IslamicGuideAI Backend Module...")
@@ -124,41 +101,18 @@ async def log_frontend(request: LogRequest):
     """
     Endpoint to receive logs from the frontend.
     """
-    # In serverless environment, just log to console
-    if IS_SERVERLESS:
-        logger.log(
-            getattr(logging, request.level.upper(), logging.INFO),
-            f"[FRONTEND] {request.message}"
-        )
-        return {"status": "logged"}
+    # Always log to console (stdout) which Vercel captures
+    log_msg = f"[FRONTEND] {request.message}"
+    level = request.level.upper()
     
-    # In local environment, write to file
-    try:
-        if not IS_SERVERLESS:
-            frontend_log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "frontend")
-            os.makedirs(frontend_log_dir, exist_ok=True)
-            frontend_log_file = os.path.join(frontend_log_dir, "frontend.log")
-            
-            log_entry = f"{request.timestamp} - FRONTEND - {request.level.upper()} - {request.message}\n"
-            
-            with open(frontend_log_file, "a", encoding="utf-8") as f:
-                f.write(log_entry)
-        else:
-            # Fallback to console in serverless
-            logger.log(
-                getattr(logging, request.level.upper(), logging.INFO),
-                f"[FRONTEND] {request.message}"
-            )
-            
-        return {"status": "logged"}
-    except Exception as e:
-        # Fallback to console if file write fails
-        logger.error(f"Failed to write frontend log to file: {e}")
-        logger.log(
-            getattr(logging, request.level.upper(), logging.INFO),
-            f"[FRONTEND] {request.message}"
-        )
-        return {"status": "logged_console_fallback"}
+    if level == "ERROR":
+        logger.error(log_msg)
+    elif level == "WARNING":
+        logger.warning(log_msg)
+    else:
+        logger.info(log_msg)
+        
+    return {"status": "logged"}
 
 @app.post("/api/guidance")
 async def get_guidance(request: GuidanceRequest):
