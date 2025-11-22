@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Islamic Guidance AI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Dark Mode Toggle -->
+  <button id="darkModeToggle" class="dark-mode-toggle" aria-label="Toggle dark mode" title="Toggle Dark Mode">
+    <span class="moon-icon">🌙</span>
+    <span class="sun-icon hidden">☀️</span>
+  </button>
+  
+  <section class="hero">
+    <div class="logo-container">
+      <img src="logo.svg" alt="Islamic Guidance AI" class="logo" id="themeLogo" />
+    </div>
+    <h1>Islamic Guidance AI</h1>
+    
+    <div class="search-container">
+      <!-- Bigger resizable textarea -->
+      <textarea
+        id="query"
+        rows="6"
+        placeholder="Describe your situation in detail... (e.g., 'I am feeling sad and Anxious')"
+        autocomplete="off"
+      ></textarea>
+      
+      <!-- Dropdowns row -->
+      <div class="options-row">
+        <select id="source" class="source-select" aria-label="Select guidance source">
+          <option value="both" selected>Both (AI + Sources)</option>
+          <option value="internal">Internal (AI Only)</option>
+          <option value="external">External (Sources Only)</option>
+        </select>
+        <select id="hadithCollection" class="hadith-collection-select" aria-label="Select Hadith collection">
+          <option value="Sahihayn">Sahihayn (2 Books)</option>
+          <option value="Forty_Collections">Forty Collections (3 Books)</option>
+          <option value="Sunan_Arbaah">Sunan Arbaah (4 Books)</option>
+          <option value="Kutub_al_Sittah">Kutub al-Sittah (6 Books)</option>
+          <option value="Kutub_as_Sabiah">Kutub as-Sabiah (7 Books)</option>
+        </select>
+      </div>
+      
+      <!-- Full-width button below -->
+      <button id="searchBtn" class="full-width-btn">GET GUIDANCE</button>
+    </div>
+    
+    <a href="settings.html" class="settings-link">Settings</a>
+    <div id="status" class="status hidden"></div>
+    <div id="toast" class="toast hidden"></div>
+    
+    <section id="result" class="result hidden">
+      <div id="answer" class="answer"></div>
+      <div id="citations" class="citations"></div>
+    </section>
+  </section>
+  
+  <script src="script.js"></script>
+</body>
+</html>

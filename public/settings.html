@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings – Islamic Guidance AI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Dark Mode Toggle -->
+  <button id="darkModeToggle" class="dark-mode-toggle" aria-label="Toggle dark mode" title="Toggle Dark Mode">
+    <span class="moon-icon">🌙</span>
+    <span class="sun-icon hidden">☀️</span>
+  </button>
+  
+  <section class="hero">
+    <img src="logo.svg" alt="Islamic Guidance AI" class="logo" />
+    <h1>Settings</h1>
+    <div class="settings-panel">
+      <label for="themeSelect">Theme</label>
+      <select id="themeSelect" aria-label="Select theme">
+        <option value="modern">Modern Blue</option>
+        <option value="traditional">Traditional Islamic</option>
+        <option value="minimal">Minimal White</option>
+      </select>
+      
+      <label for="apiKey">Google Gemini API Key</label>
+      <div class="password-input-wrapper">
+        <input type="password" id="apiKey" placeholder="Enter your API key" autocomplete="off" />
+        <button type="button" id="toggleApiKeyVisibility" class="eye-icon" aria-label="Toggle API key visibility">
+          <span class="eye-open">👁️</span>
+          <span class="eye-closed hidden">🔒</span>
+        </button>
+      </div>
+      <button id="saveKeyBtn">Save Key</button>
+    </div>
+    <div id="statusMessage" class="status-message hidden"></div>
+    <a href="index.html" class="back-link">← Back to Home</a>
+  </section>
+  <script src="settings.js"></script>
+</body>
+</html>

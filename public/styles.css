@@ -1,0 +1,425 @@
+/* styles.css */
+/* Global reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: linear-gradient(135deg, #f5f7fa, #c3cfe2);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #333;
+}
+
+.hero {
+  text-align: center;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  padding: 2rem 1.5rem;
+  border-radius: 1rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+  width: 100%;
+}
+
+.logo {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 1rem;
+}
+
+h1 {
+  font-size: 2rem;
+  margin-bottom: 1.5rem;
+  color: #2c3e50;
+}
+
+.search-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  width: 100%;
+}
+
+.search-row {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.options-row {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+}
+
+#query {
+  flex: 1;
+  padding: 1rem 1.2rem; /* Bigger padding */
+  font-size: 1.1rem; /* Bigger font */
+  border: 2px solid #bdc3c7;
+  border-radius: 0.5rem;
+  transition: border-color 0.2s;
+}
+
+#query:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+#searchBtn {
+  padding: 1rem 1.5rem; /* Bigger button to match input */
+  font-size: 1.1rem;
+  background: #3498db;
+  color: #fff;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.source-select,
+.hadith-collection-select {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: 2px solid #bdc3c7;
+  border-radius: 0.5rem;
+  background-color: white;
+  cursor: pointer;
+  min-width: 200px;
+  transition: border-color 0.2s;
+}
+
+.source-select:focus,
+.hadith-collection-select:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+#searchBtn:hover {
+  background: #2980b9;
+}
+
+.status {
+  margin-top: 0.5rem;
+  font-style: italic;
+  color: #555;
+}
+
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #e74c3c;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  animation: fadeInOut 4s forwards;
+}
+
+@keyframes fadeInOut {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.result {
+  margin-top: 1.5rem;
+  background: rgba(255,255,255,0.8);
+  padding: 1rem;
+  border-radius: 0.75rem;
+  text-align: left;
+}
+
+.answer {
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.citations {
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.hidden { display: none; }
+
+/* Settings page specific */
+.settings-panel {
+  margin: 1rem 0;
+  text-align: left;
+}
+.settings-panel label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+#themeSelect {
+  width: 100%;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: 2px solid #bdc3c7;
+  border-radius: 0.5rem;
+  background-color: white;
+  color: #333;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  margin-bottom: 1.5rem;
+}
+
+#themeSelect:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.settings-panel input {
+  width: 100%;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid #bdc3c7;
+  border-radius: 0.3rem;
+}
+.settings-panel button {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: #fff;
+  border: none;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.settings-link {
+  display: inline-block;
+  margin-top: 1rem;
+  color: #3498db;
+  text-decoration: none;
+}
+.settings-link:hover {
+  text-decoration: underline;
+}
+
+.status-message {
+  margin-top: 1rem;
+  font-weight: bold;
+  padding: 0.5rem;
+  border-radius: 0.3rem;
+  background-color: rgba(255,255,255,0.8);
+}
+
+.error-message {
+  background-color: #fee;
+  border-left: 4px solid #e74c3c;
+  padding: 1rem;
+  color: #c0392b;
+  border-radius: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+/* Dark/Light theme handling */
+html[data-theme='dark'] body {
+  background: #1e1e1e;
+  color: #e0e0e0;
+}
+html[data-theme='dark'] .hero {
+  background: rgba(0,0,0,0.6);
+  color: #e0e0e0;
+}
+html[data-theme='dark'] h1 {
+  color: #e0e0e0;
+}
+html[data-theme='dark'] #query {
+  background: #333;
+  color: #fff;
+  border-color: #555;
+}
+html[data-theme='dark'] #searchBtn {
+  background: #555;
+}
+html[data-theme='dark'] .source-select,
+html[data-theme='dark'] .hadith-collection-select,
+html[data-theme='dark'] #themeSelect {
+  background-color: #333;
+  color: #fff;
+  border-color: #555;
+}
+html[data-theme='dark'] .settings-panel button {
+  background: #555;
+}
+html[data-theme='dark'] .result {
+  background: rgba(0,0,0,0.6);
+  color: #e0e0e0;
+}
+html[data-theme='dark'] .citations {
+  color: #aaa;
+}
+html[data-theme='dark'] .citations a {
+  color: #81d4fa;
+}
+html[data-theme='dark'] .error-message {
+  background-color: #4a1a1a;
+  border-left-color: #e74c3c;
+  color: #ff6b6b;
+}
+
+/* Traditional Islamic Theme */
+html[data-theme='traditional'] body {
+  background: linear-gradient(135deg, #f5f0e8, #e8dcc8);
+  font-family: 'Georgia', serif;
+}
+html[data-theme='traditional'] .hero {
+  background: rgba(245, 240, 232, 0.95);
+  border: 2px solid #c9a961;
+}
+html[data-theme='traditional'] h1 {
+  color: #3e2723;
+  font-family: 'Georgia', serif;
+}
+html[data-theme='traditional'] #query,
+html[data-theme='traditional'] .source-select,
+html[data-theme='traditional'] .hadith-collection-select,
+html[data-theme='traditional'] #themeSelect {
+  background: #faf7f2;
+  border-color: #c9a961;
+  color: #3e2723;
+}
+html[data-theme='traditional'] #searchBtn,
+html[data-theme='traditional'] .settings-panel button {
+  background: #1a5f5f;
+  color: #ffd700;
+}
+html[data-theme='traditional'] #searchBtn:hover,
+html[data-theme='traditional'] .settings-panel button:hover {
+  background: #154a4a;
+}
+
+/* Minimal White Theme */
+html[data-theme='minimal'] body {
+  background: linear-gradient(135deg, #f5f5f5, #e0e0e0);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html[data-theme='minimal'] .hero {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+html[data-theme='minimal'] h1 {
+  color: #000;
+  font-weight: 300;
+}
+html[data-theme='minimal'] #query,
+html[data-theme='minimal'] .source-select,
+html[data-theme='minimal'] .hadith-collection-select,
+html[data-theme='minimal'] #themeSelect {
+  background: #fafafa;
+  border-color: #ddd;
+  color: #333;
+}
+html[data-theme='minimal'] #searchBtn,
+html[data-theme='minimal'] .settings-panel button {
+  background: #333;
+  color: #fff;
+}
+html[data-theme='minimal'] #searchBtn:hover,
+html[data-theme='minimal'] .settings-panel button:hover {
+  background: #000;
+}
+
+/* Dark Mode Toggle Button */
+.dark-mode-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid #bdc3c7;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  transition: all 0.3s;
+  z-index: 1000;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.dark-mode-toggle:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+}
+
+html[data-theme='dark'] .dark-mode-toggle {
+  background: rgba(0, 0, 0, 0.9);
+  border-color: #555;
+}
+
+.dark-mode-toggle .sun-icon,
+.dark-mode-toggle .moon-icon {
+  position: absolute;
+  transition: opacity 0.3s;
+}
+
+html[data-theme='light'] .dark-mode-toggle .sun-icon {
+  opacity: 1;
+}
+
+html[data-theme='light'] .dark-mode-toggle .moon-icon {
+  opacity: 0;
+}
+
+html[data-theme='dark'] .dark-mode-toggle .sun-icon {
+  opacity: 0;
+}
+
+html[data-theme='dark'] .dark-mode-toggle .moon-icon {
+  opacity: 1;
+}
+
+/* Password Input Wrapper */
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.password-input-wrapper input {
+  flex: 1;
+  width: 100%;
+  padding-right: 3rem !important;
+}
+
+.eye-icon {
+  position: absolute;
+  right: 0.5rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s;
+}
+
+.eye-icon:hover {
+  opacity: 0.7;
+}
+
+.eye-icon .eye-open,
+.eye-icon .eye-closed {
+  position: absolute;
+}
+
