@@ -6,9 +6,22 @@ Handles Quran, Hadith, and Gemini AI interactions
 import httpx
 import os
 import logging
+import sys
 from typing import List, Dict, Optional
 import asyncio
 from functools import lru_cache
+
+# ============================================================================
+# LOGGING CONFIGURATION - EXPLICIT CONSOLE ONLY
+# ============================================================================
+
+# Force console-only logging (no file handlers)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True  # Override any existing config
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +54,7 @@ class GeminiService:
             AI-generated guidance text
         """
         try:
+            logger.info(f"🤖 Requesting guidance for query: {query[:50]}...")
             prompt = self._build_prompt(query, include_sources)
             
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -58,6 +72,7 @@ class GeminiService:
                         }
                     }
                 )
+                logger.info(f"📡 Gemini API response: {response.status_code}")
                 response.raise_for_status()
                 
                 data = response.json()
@@ -67,6 +82,7 @@ class GeminiService:
                     candidate = data["candidates"][0]
                     if "content" in candidate and "parts" in candidate["content"]:
                         text = candidate["content"]["parts"][0].get("text", "")
+                        logger.info(f"✅ Generated {len(text)} characters of guidance")
                         return text.strip()
                 
                 logger.warning("⚠️ Unexpected Gemini response format")
@@ -79,7 +95,7 @@ class GeminiService:
             logger.error("❌ Gemini API timeout")
             raise Exception("Request timed out. Please try again.")
         except Exception as e:
-            logger.error(f"❌ Gemini service error: {e}")
+            logger.error(f"❌ Gemini service error: {type(e).__name__}: {str(e)}")
             raise Exception(f"AI service error: {str(e)}")
     
     def _build_prompt(self, query: str, include_sources: bool) -> str:
@@ -126,6 +142,7 @@ class QuranService:
             Search results from Quran API
         """
         try:
+            logger.info(f"📖 Searching Quran for: {keyword}")
             params = {
                 "q": keyword,
                 "size": min(limit, 20),
@@ -137,27 +154,37 @@ class QuranService:
                     f"{self.base_url}/search",
                     params=params
                 )
+                logger.info(f"📡 Quran API response: {response.status_code}")
                 response.raise_for_status()
-                return response.json()
+                
+                data = response.json()
+                results_count = len(data.get("search", {}).get("results", []))
+                logger.info(f"✅ Found {results_count} Quran verses")
+                return data
                 
         except httpx.HTTPStatusError as e:
             logger.error(f"❌ Quran API HTTP error: {e.response.status_code}")
             return {"search": {"results": []}}
+        except httpx.TimeoutException:
+            logger.error("❌ Quran API timeout")
+            return {"search": {"results": []}}
         except Exception as e:
-            logger.error(f"❌ Quran service error: {e}")
+            logger.error(f"❌ Quran service error: {type(e).__name__}: {str(e)}")
             return {"search": {"results": []}}
     
     async def get_verse(self, chapter: int, verse: int) -> Optional[Dict]:
         """Get a specific verse"""
         try:
+            logger.info(f"📖 Getting verse {chapter}:{verse}")
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
                     f"{self.base_url}/verses/by_key/{chapter}:{verse}"
                 )
                 response.raise_for_status()
+                logger.info(f"✅ Retrieved verse {chapter}:{verse}")
                 return response.json()
         except Exception as e:
-            logger.error(f"❌ Error getting verse {chapter}:{verse}: {e}")
+            logger.error(f"❌ Error getting verse {chapter}:{verse}: {str(e)}")
             return None
 
 # ============================================================================
@@ -200,6 +227,8 @@ class HadithService:
         if collections is None:
             collections = ["eng-bukhari", "eng-muslim"]
         
+        logger.info(f"📚 Searching {len(collections)} Hadith collections for: {query}")
+        
         # Search all collections concurrently
         tasks = [
             self._search_collection(coll, query, limit)
@@ -213,7 +242,10 @@ class HadithService:
         for result in results:
             if isinstance(result, list):
                 all_hadiths.extend(result)
+            elif isinstance(result, Exception):
+                logger.warning(f"⚠️ Collection search failed: {str(result)}")
         
+        logger.info(f"✅ Found {len(all_hadiths)} total Hadith")
         return all_hadiths[:limit]
     
     async def _search_collection(
@@ -224,6 +256,7 @@ class HadithService:
     ) -> List[Dict]:
         """Search a specific Hadith collection"""
         try:
+            logger.info(f"📚 Searching {collection}...")
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
                     f"{self.base_url}/collections/{collection}/hadith",
@@ -232,12 +265,18 @@ class HadithService:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    return data.get("data", [])
+                    results = data.get("data", [])
+                    logger.info(f"✅ {collection}: {len(results)} hadiths found")
+                    return results
+                else:
+                    logger.warning(f"⚠️ {collection}: HTTP {response.status_code}")
+                    return []
                 
-                return []
-                
+        except httpx.TimeoutException:
+            logger.error(f"❌ {collection}: Timeout")
+            return []
         except Exception as e:
-            logger.error(f"❌ Error searching {collection}: {e}")
+            logger.error(f"❌ {collection}: {type(e).__name__}: {str(e)}")
             return []
     
     def get_collection_name(self, collection_id: str) -> str:
