@@ -9,6 +9,11 @@ coverage/
 .idea/
 api_responses/
 
+# Node.js artifacts (not needed for Python backend)
+package.json
+package-lock.json
+tsconfig.json
+
 # Vercel
 .vercel
 .vercel/
