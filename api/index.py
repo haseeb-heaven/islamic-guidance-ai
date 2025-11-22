@@ -8,6 +8,8 @@ import os
 
 # Add the parent directory to Python path so we can import from backend
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+print(f"Current working directory: {os.getcwd()}")
+print(f"Python path: {sys.path}")
 
 from backend.main import app
 

@@ -15,7 +15,15 @@ import google.generativeai as genai
 from backend.services import search_quran, search_hadith
 
 # Load environment variables
-load_dotenv()
+# Load environment variables
+# Only load .env in local development
+if os.getenv("VERCEL") != "1":
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+        print(f"Loaded environment from {env_path}")
+    else:
+        print("No .env file found, assuming environment variables are set")
 
 # --- Logging Configuration ---
 # Check if running in serverless environment (Vercel)
