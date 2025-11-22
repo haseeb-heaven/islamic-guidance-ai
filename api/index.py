@@ -1,15 +1,18 @@
-"""
-Vercel Serverless Function Entry Point for IslamicGuideAI Backend
-This file adapts the FastAPI application to work with Vercel's serverless infrastructure.
-"""
-
 import sys
 import os
 
+print(f"Current working directory: {os.getcwd()}", flush=True)
+print(f"Directory contents: {os.listdir('.')}", flush=True)
+print(f"Python path: {sys.path}", flush=True)
+
+try:
+    import fastapi
+    print("FastAPI is installed", flush=True)
+except ImportError:
+    print("FastAPI is NOT installed", flush=True)
+
 # Add the parent directory to Python path so we can import from backend
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-print(f"Current working directory: {os.getcwd()}")
-print(f"Python path: {sys.path}")
 
 try:
     print("Attempting to import backend.main...", flush=True)
