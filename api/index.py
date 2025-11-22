@@ -12,11 +12,14 @@ print(f"Current working directory: {os.getcwd()}")
 print(f"Python path: {sys.path}")
 
 try:
+    print("Attempting to import backend.main...", flush=True)
     from backend.main import app
+    print("Successfully imported backend.main", flush=True)
 except Exception as e:
     import traceback
-    print(f"Error importing backend.main: {e}")
+    print(f"Error importing backend.main: {e}", flush=True)
     traceback.print_exc()
+    sys.stdout.flush()
     raise e
 
 # Vercel expects a handler function or an ASGI app

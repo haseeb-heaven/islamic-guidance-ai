@@ -1,16 +1,23 @@
+import sys
+print("Initializing backend.main...", flush=True)
 import os
+print("Importing json/traceback/uvicorn/logging...", flush=True)
 import json
 import traceback
 import uvicorn
 import logging
+print("Importing fastapi...", flush=True)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+print("Importing pydantic/dotenv...", flush=True)
 from pydantic import BaseModel
 from dotenv import load_dotenv
+print("Importing google.generativeai...", flush=True)
 import google.generativeai as genai
 
+print("Importing backend services...", flush=True)
 # Load environment variables
 from backend.services import search_quran, search_hadith
 # Load environment variables
