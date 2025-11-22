@@ -37,14 +37,24 @@ except ImportError as e:
     logger.error(f"❌ Failed to import FastAPI: {e}")
     raise
 
-# Try to import backend
+# Try to import backend with detailed error tracking
+import_errors = []
 try:
     from backend.main import app as backend_app
     logger.info("✅ Backend app imported successfully")
     HAS_BACKEND = True
 except Exception as e:
+    import_error = {
+        "error": str(e),
+        "type": type(e).__name__,
+        "path": sys.path,
+        "cwd": os.getcwd()
+    }
+    import_errors.append(import_error)
     logger.error(f"❌ Failed to import backend: {e}")
     logger.error(f"❌ Error type: {type(e).__name__}")
+    logger.error(f"❌ Current path: {sys.path}")
+    logger.error(f"❌ CWD: {os.getcwd()}")
     HAS_BACKEND = False
     backend_app = None
 
@@ -66,12 +76,18 @@ app.add_middleware(
 # Root endpoint
 @app.get("/")
 async def root():
-    return {
+    response = {
         "name": "Islamic Guidance AI",
         "status": "running",
         "backend_loaded": HAS_BACKEND,
         "version": "1.0.0"
     }
+    
+    # Add diagnostics if backend failed to load
+    if not HAS_BACKEND and import_errors:
+        response["import_errors"] = import_errors
+    
+    return response
 
 # Health check
 @app.get("/health")
