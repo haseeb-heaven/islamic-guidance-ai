@@ -1,152 +1,245 @@
-import requests
-import urllib.parse
+"""
+Service Layer for External APIs
+Handles Quran, Hadith, and Gemini AI interactions
+"""
+
+import httpx
+import os
 import logging
+from typing import List, Dict, Optional
+import asyncio
+from functools import lru_cache
 
-logger = logging.getLogger("IslamicGuideAI")
+logger = logging.getLogger(__name__)
 
-def search_quran(keyword: str):
-    """
-    Search Quran verses using the external API.
-    Returns top 3 matches.
-    """
-    if not keyword:
-        logger.warning("[QURAN API] No keyword provided, returning empty results")
-        return []
-        
-    encoded = urllib.parse.quote(keyword)
-    url = f"https://api.alquran.cloud/v1/search/{encoded}/all/en"
-    logger.info(f"[QURAN API] Request URL: {url}")
+# ============================================================================
+# GEMINI AI SERVICE
+# ============================================================================
+
+class GeminiService:
+    """Service for interacting with Google Gemini AI"""
     
-    try:
-        resp = requests.get(url, timeout=10)
-        logger.info(f"[QURAN API] Response Status: {resp.status_code}")
-        logger.info(f"[QURAN API] Response Headers: {dict(resp.headers)}")
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            logger.error("❌ GEMINI_API_KEY not found in environment")
+            raise ValueError("GEMINI_API_KEY environment variable is required")
         
-        if resp.status_code == 200:
-            data = resp.json()
-            total_matches = data.get("data", {}).get("count", 0)
-            logger.info(f"[QURAN API] Total matches found: {total_matches}")
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+        self.timeout = httpx.Timeout(30.0, connect=10.0)
+        logger.info("✅ GeminiService initialized")
+    
+    async def get_guidance(self, query: str, include_sources: bool = True) -> str:
+        """
+        Get Islamic guidance from Gemini AI
+        
+        Args:
+            query: User's question
+            include_sources: Whether to request citations
+        
+        Returns:
+            AI-generated guidance text
+        """
+        try:
+            prompt = self._build_prompt(query, include_sources)
             
-            if data.get("data") and data["data"].get("matches"):
-                results = [
-                    {
-                        "text": m["text"],
-                        "surah": m["surah"]["englishName"],
-                        "number": m["number"],
-                        "numberInSurah": m["numberInSurah"],
-                        "source": "Quran"
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.base_url}?key={self.api_key}",
+                    json={
+                        "contents": [{
+                            "parts": [{"text": prompt}]
+                        }],
+                        "generationConfig": {
+                            "temperature": 0.7,
+                            "topK": 40,
+                            "topP": 0.95,
+                            "maxOutputTokens": 2048,
+                        }
                     }
-                    for m in data["data"]["matches"][:3]
-                ]
-                logger.info(f"[QURAN API] Returning top {len(results)} results")
-                return results
-        else:
-            logger.error(f"[QURAN API] API returned status code {resp.status_code}")
-    except Exception as e:
-        logger.error(f"[QURAN API] Error searching Quran: {e}", exc_info=True)
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                # Extract text from response
+                if "candidates" in data and len(data["candidates"]) > 0:
+                    candidate = data["candidates"][0]
+                    if "content" in candidate and "parts" in candidate["content"]:
+                        text = candidate["content"]["parts"][0].get("text", "")
+                        return text.strip()
+                
+                logger.warning("⚠️ Unexpected Gemini response format")
+                return "Unable to generate guidance at this time."
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ Gemini API HTTP error: {e.response.status_code}")
+            raise Exception(f"Gemini API error: {e.response.status_code}")
+        except httpx.TimeoutException:
+            logger.error("❌ Gemini API timeout")
+            raise Exception("Request timed out. Please try again.")
+        except Exception as e:
+            logger.error(f"❌ Gemini service error: {e}")
+            raise Exception(f"AI service error: {str(e)}")
     
-    logger.info("[QURAN API] No results found, returning empty list")
-    return []
+    def _build_prompt(self, query: str, include_sources: bool) -> str:
+        """Build the prompt for Gemini AI"""
+        base_prompt = f"""You are an Islamic guidance assistant. Provide compassionate, accurate advice based on Quran and authentic Hadith.
 
-def search_hadith(topic: str, collections: list = None):
-    """
-    Search Hadiths for a topic across specified or all major collections.
-    Returns a list of matching hadiths from all collections.
+User Question: {query}
+
+Please provide:
+1. Direct, empathetic answer to the question
+2. Islamic perspective and guidance
+3. Practical advice where applicable"""
+
+        if include_sources:
+            base_prompt += """
+4. Relevant Quran verses (with Surah and Ayah numbers)
+5. Relevant Hadith references (with collection and book)
+
+Format citations as: [Surah Name Chapter:Verse] or [Collection - Book Number:Hadith Number]"""
+
+        return base_prompt
+
+# ============================================================================
+# QURAN API SERVICE
+# ============================================================================
+
+class QuranService:
+    """Service for searching and retrieving Quran verses"""
     
-    Args:
-        topic: The topic to search for
-        collections: List of collection codes (e.g., ['eng-bukhari', 'eng-muslim'])
-                    If None, searches all major collections
-    """
-    if not topic:
-        logger.warning("[HADITH API] No topic provided, returning empty list")
-        return []
+    def __init__(self):
+        self.base_url = "https://api.quran.com/api/v4"
+        self.timeout = httpx.Timeout(15.0, connect=5.0)
+        logger.info("✅ QuranService initialized")
     
-    # Default to all major collections if none specified
-    if not collections:
-        collections = ["eng-bukhari", "eng-muslim", "eng-abudawud", "eng-tirmidhi", "eng-nasai", "eng-ibnmajah"]
-    
-    # Remove 'eng-' prefix if present for logging
-    collection_names = [c.replace('eng-', '') for c in collections]
-    
-    all_matches = []
-    
-    logger.info(f"[HADITH SEARCH] Starting search for topic: '{topic}' across {len(collections)} collections")
-    logger.info(f"[HADITH SEARCH] Collections: {', '.join(collection_names)}")
-    logger.info("="*80)
-    
-    for collection_code in collections:
-        # Extract book name (remove 'eng-' prefix if present)
-        book = collection_code.replace('eng-', '') if collection_code.startswith('eng-') else collection_code
-        logger.info(f"[HADITH API] Searching in collection: '{book}'")
+    async def search(self, keyword: str, limit: int = 10) -> Dict:
+        """
+        Search Quran verses by keyword
         
-        base = "https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions"
-        urls = [
-            f"{base}/eng-{book}.min.json",
-            f"{base}/eng-{book}.json",
-            f"https://raw.githubusercontent.com/fawazahmed0/hadith-api/1/editions/eng-{book}.min.json",
+        Args:
+            keyword: Search term
+            limit: Maximum results to return
+        
+        Returns:
+            Search results from Quran API
+        """
+        try:
+            params = {
+                "q": keyword,
+                "size": min(limit, 20),
+                "page": 1
+            }
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.base_url}/search",
+                    params=params
+                )
+                response.raise_for_status()
+                return response.json()
+                
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ Quran API HTTP error: {e.response.status_code}")
+            return {"search": {"results": []}}
+        except Exception as e:
+            logger.error(f"❌ Quran service error: {e}")
+            return {"search": {"results": []}}
+    
+    async def get_verse(self, chapter: int, verse: int) -> Optional[Dict]:
+        """Get a specific verse"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.base_url}/verses/by_key/{chapter}:{verse}"
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"❌ Error getting verse {chapter}:{verse}: {e}")
+            return None
+
+# ============================================================================
+# HADITH API SERVICE
+# ============================================================================
+
+class HadithService:
+    """Service for searching and retrieving Hadith"""
+    
+    def __init__(self):
+        self.base_url = "https://api.sunnah.com/v1"
+        self.timeout = httpx.Timeout(15.0, connect=5.0)
+        self.collections = {
+            "eng-bukhari": "Sahih Bukhari",
+            "eng-muslim": "Sahih Muslim",
+            "eng-abudawud": "Abu Dawud",
+            "eng-tirmidhi": "Tirmidhi",
+            "eng-nasai": "Nasa'i",
+            "eng-ibnmajah": "Ibn Majah"
+        }
+        logger.info("✅ HadithService initialized")
+    
+    async def search(
+        self,
+        query: str,
+        collections: List[str] = None,
+        limit: int = 10
+    ) -> List[Dict]:
+        """
+        Search Hadith across collections
+        
+        Args:
+            query: Search query
+            collections: List of collection IDs to search
+            limit: Maximum results per collection
+        
+        Returns:
+            List of Hadith results
+        """
+        if collections is None:
+            collections = ["eng-bukhari", "eng-muslim"]
+        
+        # Search all collections concurrently
+        tasks = [
+            self._search_collection(coll, query, limit)
+            for coll in collections
         ]
         
-        hadiths = None
-        for idx, u in enumerate(urls, 1):
-            try:
-                logger.info(f"[HADITH API] Request URL: {u}")
-                r = requests.get(u, timeout=10)
-                logger.info(f"[HADITH API] Response Status: {r.status_code}")
-                logger.info(f"[HADITH API] Response Headers: {dict(r.headers)}")
-                
-                if r.status_code == 200 and r.json().get("hadiths"):
-                    hadiths = r.json()["hadiths"]
-                    logger.info(f"[HADITH API] Successfully loaded {len(hadiths)} hadiths from '{book}' collection")
-                    break
-            except Exception as e:
-                logger.warning(f"[HADITH API] Failed to load from URL {idx}: {e}")
-                continue
-                
-        if not hadiths:
-            logger.warning(f"[HADITH API] Could not load hadith collection '{book}' from any URL")
-            continue
-            
-        topic_lower = topic.lower()
-        logger.info(f"[HADITH API] Searching for '{topic}' in {len(hadiths)} hadiths from '{book}'...")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Search for topic in hadith text
-        matches = [h for h in hadiths if topic_lower in h.get("text", "").lower()]
+        # Flatten and filter results
+        all_hadiths = []
+        for result in results:
+            if isinstance(result, list):
+                all_hadiths.extend(result)
         
-        if matches:
-            logger.info(f"[HADITH API] Found {len(matches)} matches in '{book}'")
-            # Take top 2 matches from each collection to avoid overwhelming results
-            for match in matches[:2]:
-                hadith_number = match.get("hadithnumber", "")
-                # Create proper citation URL
-                citation_url = f"https://sunnah.com/{book}:{hadith_number}"
+        return all_hadiths[:limit]
+    
+    async def _search_collection(
+        self,
+        collection: str,
+        query: str,
+        limit: int
+    ) -> List[Dict]:
+        """Search a specific Hadith collection"""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{self.base_url}/collections/{collection}/hadith",
+                    params={"q": query, "limit": limit}
+                )
                 
-                hadith_data = {
-                    "text": match.get("text", ""),
-                    "hadithnumber": hadith_number,
-                    "arabicnumber": match.get("arabicnumber", ""),
-                    "book": book,
-                    "reference": match.get("reference", {}),
-                    "source": f"Hadith ({book.capitalize()})",
-                    "citation_url": citation_url
-                }
-                all_matches.append(hadith_data)
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get("data", [])
                 
-                # Log each match details
-                logger.info(f"  [MATCH] Collection: {book}, Hadith #: {hadith_number}")
-                logger.info(f"  [MATCH] URL: {citation_url}")
-                logger.info(f"  [MATCH] Text Preview: {match.get('text', '')[:150]}...")
-        else:
-            logger.info(f"[HADITH API] No matches found in '{book}'")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ Error searching {collection}: {e}")
+            return []
     
-    logger.info("="*80)
-    logger.info(f"[HADITH SEARCH] Total matches found across all collections: {len(all_matches)}")
-    
-    if all_matches:
-        logger.info(f"[HADITH SEARCH] Returning {len(all_matches)} Hadith results")
-        for idx, h in enumerate(all_matches, 1):
-            logger.info(f"  [{idx}] {h['book'].capitalize()}: {h['hadithnumber']} - {h['citation_url']}")
-    else:
-        logger.info("[HADITH SEARCH] No matching hadiths found in any collection")
-    
-    return all_matches
+    def get_collection_name(self, collection_id: str) -> str:
+        """Get friendly collection name"""
+        return self.collections.get(collection_id, collection_id)

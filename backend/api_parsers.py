@@ -1,530 +1,977 @@
 """
-API Parsers for Quran and Hadith Data
-Parses JSON responses from Quran and Hadith APIs
+API Response Parsers for Islamic Guidance AI
+Comprehensive parsers for Quran.com API and Sunnah.com API responses
+Handles multiple response formats, error cases, and data transformations
 """
 
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass
+from typing import Dict, Any, List, Optional, Union
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
+from enum import Enum
+import logging
+import json
+import re
 
+# Configure logger
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# ENUMERATIONS
+# ============================================================================
+
+class RevelationType(Enum):
+    """Quran revelation types"""
+    MECCAN = "Meccan"
+    MEDINAN = "Medinan"
+    UNKNOWN = "Unknown"
+
+
+class HadithGrade(Enum):
+    """Hadith authenticity grades"""
+    SAHIH = "Sahih"
+    HASAN = "Hasan"
+    DAIF = "Daif"
+    MAWDU = "Mawdu"
+    UNKNOWN = "Unknown"
+
+
+class APISource(Enum):
+    """API source identifiers"""
+    QURAN_COM = "quran.com"
+    ALQURAN_CLOUD = "alquran.cloud"
+    SUNNAH_COM = "sunnah.com"
+    HADITH_API = "hadith-api"
+
+
+# ============================================================================
+# DATA CLASSES
+# ============================================================================
 
 @dataclass
 class QuranVerse:
-    """Represents a single Quran verse from search results"""
-    number: int
-    text: str
+    """
+    Represents a single Quran verse with complete metadata
+    Supports multiple API response formats
+    """
+    # Core verse data
+    verse_key: str  # Format: "chapter:verse" (e.g., "2:255")
+    text_uthmani: str  # Arabic text in Uthmani script
+    text_simple: str  # Simplified Arabic text
+    text_translation: str  # English translation
+    
+    # Verse identifiers
+    verse_number: int  # Absolute verse number in Quran
+    verse_in_surah: int  # Verse number within surah
+    
+    # Surah metadata
     surah_number: int
     surah_name_arabic: str
     surah_name_english: str
-    surah_translation: str
-    revelation_type: str
-    verse_number_in_surah: int
-    edition_name: str
-    edition_language: str
+    surah_name_translation: str
+    revelation_type: RevelationType
+    
+    # Optional metadata
+    juz_number: Optional[int] = None
+    hizb_number: Optional[int] = None
+    page_number: Optional[int] = None
+    
+    # Translation/Edition info
+    translator_name: Optional[str] = None
+    translation_id: Optional[str] = None
+    
+    # Search relevance
+    relevance_score: Optional[float] = None
+    highlighted_text: Optional[str] = None
+    
+    # Timestamps
+    retrieved_at: datetime = field(default_factory=datetime.now)
     
     def __str__(self) -> str:
-        return f"[{self.surah_name_english} {self.surah_number}:{self.verse_number_in_surah}] {self.text}"
+        """String representation"""
+        return f"[Quran {self.verse_key}] {self.surah_name_english}"
+    
+    def __repr__(self) -> str:
+        """Detailed representation"""
+        return (
+            f"QuranVerse(verse_key='{self.verse_key}', "
+            f"surah='{self.surah_name_english}', "
+            f"verse={self.verse_in_surah})"
+        )
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary"""
-        return {
-            "number": self.number,
-            "text": self.text,
-            "surah": {
-                "number": self.surah_number,
-                "name_arabic": self.surah_name_arabic,
-                "name_english": self.surah_name_english,
-                "translation": self.surah_translation,
-                "revelation_type": self.revelation_type
-            },
-            "verse_in_surah": self.verse_number_in_surah,
-            "edition": {
-                "name": self.edition_name,
-                "language": self.edition_language
-            }
-        }
+        """Convert to dictionary for JSON serialization"""
+        data = asdict(self)
+        # Convert enums and datetime
+        data['revelation_type'] = self.revelation_type.value
+        data['retrieved_at'] = self.retrieved_at.isoformat()
+        return data
+    
+    def to_citation(self) -> str:
+        """Generate proper Islamic citation"""
+        return f"[Quran {self.surah_name_english} {self.surah_number}:{self.verse_in_surah}]"
+    
+    def get_quran_com_url(self) -> str:
+        """Get Quran.com URL for this verse"""
+        return f"https://quran.com/{self.verse_key}"
+    
+    def format_for_display(self, include_arabic: bool = True) -> str:
+        """
+        Format verse for user-friendly display
+        
+        Args:
+            include_arabic: Whether to include Arabic text
+            
+        Returns:
+            Formatted string with verse details
+        """
+        lines = [
+            f"📖 {self.surah_name_english} ({self.surah_name_arabic})",
+            f"📍 Chapter {self.surah_number}, Verse {self.verse_in_surah}",
+            f"🕌 Revelation: {self.revelation_type.value}",
+            ""
+        ]
+        
+        if include_arabic and self.text_uthmani:
+            lines.append(f"Arabic: {self.text_uthmani}")
+            lines.append("")
+        
+        lines.append(f'"{self.text_translation}"')
+        lines.append("")
+        lines.append(f"🔗 {self.get_quran_com_url()}")
+        
+        return "\n".join(lines)
 
 
 @dataclass
-class Hadith:
-    """Represents a single Hadith"""
-    hadith_number: int
-    arabic_number: int
-    text: str
-    collection_name: str
-    book_reference: Optional[int] = None
-    grades: Optional[List[str]] = None
-    reference: Optional[Dict[str, Any]] = None
+class HadithNarration:
+    """
+    Represents a single Hadith with complete chain and metadata
+    """
+    # Core hadith data
+    hadith_number: int  # Number in collection
+    book_number: int  # Book within collection
+    chapter_number: Optional[int] = None
+    
+    # Text content
+    arabic_text: Optional[str] = None
+    english_text: str = ""
+    
+    # Collection info
+    collection_name: str = ""
+    collection_id: str = ""
+    book_name: str = ""
+    chapter_name: Optional[str] = None
+    
+    # Authenticity
+    grades: List[str] = field(default_factory=list)
+    primary_grade: Optional[HadithGrade] = None
+    
+    # Chain of narration (Isnad)
+    narrator_chain: List[str] = field(default_factory=list)
+    
+    # References
+    references: Dict[str, Any] = field(default_factory=dict)
+    
+    # Metadata
+    volume_number: Optional[int] = None
+    page_number: Optional[int] = None
+    
+    # Search relevance
+    relevance_score: Optional[float] = None
+    matched_keywords: List[str] = field(default_factory=list)
+    
+    # Timestamps
+    retrieved_at: datetime = field(default_factory=datetime.now)
     
     def __str__(self) -> str:
-        return f"[{self.collection_name} #{self.hadith_number}] {self.text[:100]}..."
+        """String representation"""
+        return f"[{self.collection_name} {self.hadith_number}]"
+    
+    def __repr__(self) -> str:
+        """Detailed representation"""
+        return (
+            f"HadithNarration(collection='{self.collection_name}', "
+            f"hadith_number={self.hadith_number}, "
+            f"book={self.book_number})"
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        data = asdict(self)
+        # Convert enums and datetime
+        if self.primary_grade:
+            data['primary_grade'] = self.primary_grade.value
+        data['retrieved_at'] = self.retrieved_at.isoformat()
+        return data
+    
+    def to_citation(self) -> str:
+        """Generate proper Islamic citation"""
+        book_ref = f", Book {self.book_number}" if self.book_number else ""
+        return f"[{self.collection_name}{book_ref}:{self.hadith_number}]"
+    
+    def get_sunnah_com_url(self) -> str:
+        """Get Sunnah.com URL for this hadith"""
+        if self.collection_id:
+            return f"https://sunnah.com/{self.collection_id}:{self.hadith_number}"
+        return f"https://sunnah.com/{self.collection_name.lower().replace(' ', '')}:{self.hadith_number}"
+    
+    def format_for_display(self, include_arabic: bool = False) -> str:
+        """
+        Format hadith for user-friendly display
+        
+        Args:
+            include_arabic: Whether to include Arabic text
+            
+        Returns:
+            Formatted string with hadith details
+        """
+        lines = [
+            f"📚 {self.collection_name}",
+            f"📖 Book {self.book_number}: {self.book_name}",
+            f"📍 Hadith #{self.hadith_number}",
+        ]
+        
+        if self.grades:
+            lines.append(f"✅ Grade: {', '.join(self.grades)}")
+        
+        lines.append("")
+        
+        if include_arabic and self.arabic_text:
+            lines.append(f"Arabic: {self.arabic_text}")
+            lines.append("")
+        
+        lines.append(f'"{self.english_text}"')
+        lines.append("")
+        lines.append(f"🔗 {self.get_sunnah_com_url()}")
+        
+        return "\n".join(lines)
+
+
+@dataclass
+class SearchResult:
+    """
+    Aggregated search results from multiple sources
+    """
+    query: str
+    timestamp: datetime = field(default_factory=datetime.now)
+    
+    # Results
+    quran_verses: List[QuranVerse] = field(default_factory=list)
+    hadiths: List[HadithNarration] = field(default_factory=list)
+    
+    # Metadata
+    total_quran_matches: int = 0
+    total_hadith_matches: int = 0
+    search_duration_ms: Optional[float] = None
+    
+    # Errors
+    errors: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
-            "hadith_number": self.hadith_number,
-            "arabic_number": self.arabic_number,
-            "text": self.text,
-            "collection": self.collection_name,
-            "book_reference": self.book_reference,
-            "grades": self.grades or [],
-            "reference": self.reference
+            "query": self.query,
+            "timestamp": self.timestamp.isoformat(),
+            "quran_verses": [v.to_dict() for v in self.quran_verses],
+            "hadiths": [h.to_dict() for h in self.hadiths],
+            "total_quran_matches": self.total_quran_matches,
+            "total_hadith_matches": self.total_hadith_matches,
+            "search_duration_ms": self.search_duration_ms,
+            "errors": self.errors
         }
 
+
+# ============================================================================
+# QURAN API PARSER
+# ============================================================================
 
 class QuranAPIParser:
-    """Parser for Quran API responses from api.alquran.cloud"""
+    """
+    Parser for Quran.com API v4 responses
+    Handles multiple endpoints and response formats
+    """
+    
+    # Default translations
+    DEFAULT_TRANSLATION = "en.sahih"  # Sahih International
+    POPULAR_TRANSLATIONS = {
+        "en.sahih": "Saheeh International",
+        "en.pickthall": "Pickthall",
+        "en.yusufali": "Yusuf Ali",
+        "en.hilali": "Hilali & Khan",
+        "en.clear": "Clear Quran"
+    }
+    
+    def __init__(self):
+        """Initialize parser"""
+        logger.info("✅ QuranAPIParser initialized")
     
     @staticmethod
-    def parse_search_response(response_data: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_search_response(response: Dict[str, Any]) -> List[QuranVerse]:
         """
-        Parse Quran search API response
+        Parse Quran.com search API response
         
         Args:
-            response_data: Raw JSON response from API
-            
-        Returns:
-            Parsed data with verses and metadata
-        """
-        result = {
-            "success": False,
-            "code": response_data.get("code"),
-            "status": response_data.get("status"),
-            "total_matches": 0,
-            "verses": [],
-            "error": None
-        }
-        
-        # Check if request was successful
-        if response_data.get("code") != 200:
-            result["error"] = f"API returned code {response_data.get('code')}"
-            return result
-        
-        # Extract data
-        data = response_data.get("data", {})
-        result["total_matches"] = data.get("count", 0)
-        
-        # Parse matches
-        matches = data.get("matches", [])
-        for match in matches:
-            try:
-                verse = QuranAPIParser._parse_verse(match)
-                result["verses"].append(verse)
-            except Exception as e:
-                # Log error but continue parsing other verses
-                print(f"Error parsing verse: {e}")
-                continue
-        
-        result["success"] = True
-        return result
-    
-    @staticmethod
-    def _parse_verse(match_data: Dict[str, Any]) -> QuranVerse:
-        """Parse a single verse from match data"""
-        surah = match_data.get("surah", {})
-        edition = match_data.get("edition", {})
-        
-        return QuranVerse(
-            number=match_data.get("number"),
-            text=match_data.get("text", ""),
-            surah_number=surah.get("number"),
-            surah_name_arabic=surah.get("name", ""),
-            surah_name_english=surah.get("englishName", ""),
-            surah_translation=surah.get("englishNameTranslation", ""),
-            revelation_type=surah.get("revelationType", ""),
-            verse_number_in_surah=match_data.get("numberInSurah"),
-            edition_name=edition.get("englishName", ""),
-            edition_language=edition.get("language", "")
-        )
-    
-    @staticmethod
-    def get_top_verses(response_data: Dict[str, Any], limit: int = 5) -> List[QuranVerse]:
-        """
-        Get top N verses from search results
-        
-        Args:
-            response_data: Raw JSON response from API
-            limit: Maximum number of verses to return
+            response: Raw API response
             
         Returns:
             List of QuranVerse objects
         """
-        parsed = QuranAPIParser.parse_search_response(response_data)
-        return parsed["verses"][:limit]
-    
-    @staticmethod
-    def format_verse_for_display(verse: QuranVerse) -> str:
-        """
-        Format a verse for user-friendly display
-        
-        Args:
-            verse: QuranVerse object
-            
-        Returns:
-            Formatted string
-        """
-        return f"""
-[QURAN] {verse.surah_name_english}
-   Chapter {verse.surah_number}, Verse {verse.verse_number_in_surah}
-   Revelation: {verse.revelation_type}
-
-"{verse.text}"
-        """.strip()
-
-
-class HadithAPIParser:
-    """Parser for Hadith API responses from hadith-api"""
-    
-    # Collection name mapping
-    COLLECTION_NAMES = {
-        "eng-abudawud": "Sunan Abu Dawud",
-        "eng-bukhari": "Sahih al-Bukhari",
-        "eng-dehlawi": "Musnad Ahmad ibn Hanbal",
-        "eng-ibnmajah": "Sunan Ibn Majah",
-        "eng-malik": "Muwatta Malik",
-        "eng-muslim": "Sahih Muslim",
-        "eng-nasai": "Sunan an-Nasa'i",
-        "eng-nawawi": "40 Hadith Nawawi",
-        "eng-qudsi": "40 Hadith Qudsi",
-        "eng-tirmidhi": "Jami` at-Tirmidhi"
-    }
-    
-    @staticmethod
-    def parse_collection_response(response_data: Dict[str, Any], collection_id: str) -> Dict[str, Any]:
-        """
-        Parse Hadith collection API response
-        
-        Args:
-            response_data: Raw JSON response from API
-            collection_id: Collection identifier (e.g., 'eng-bukhari')
-            
-        Returns:
-            Parsed data with hadiths and metadata
-        """
-        result = {
-            "success": False,
-            "collection_id": collection_id,
-            "collection_name": HadithAPIParser.COLLECTION_NAMES.get(collection_id, collection_id),
-            "total_hadiths": 0,
-            "sections": {},
-            "hadiths": [],
-            "error": None
-        }
+        verses = []
         
         try:
-            # Extract metadata
-            metadata = response_data.get("metadata", {})
-            result["collection_name"] = metadata.get("name", result["collection_name"])
-            result["sections"] = metadata.get("sections", {})
+            # Extract search results
+            search_data = response.get("search", {})
+            results = search_data.get("results", [])
             
-            # Extract hadiths
-            hadiths_data = response_data.get("hadiths", [])
-            result["total_hadiths"] = len(hadiths_data)
+            logger.info(f"📥 Parsing {len(results)} Quran search results")
             
-            # Parse hadiths
-            for hadith_data in hadiths_data:
+            for result in results:
                 try:
-                    hadith = HadithAPIParser._parse_hadith(hadith_data, result["collection_name"])
-                    result["hadiths"].append(hadith)
+                    verse = QuranAPIParser._parse_verse_result(result)
+                    if verse:
+                        verses.append(verse)
                 except Exception as e:
-                    print(f"Error parsing hadith: {e}")
+                    logger.error(f"❌ Error parsing verse: {e}")
                     continue
             
-            result["success"] = True
+            logger.info(f"✅ Successfully parsed {len(verses)} verses")
+            
         except Exception as e:
-            result["error"] = str(e)
+            logger.error(f"❌ Error parsing search response: {e}")
         
-        return result
+        return verses
     
     @staticmethod
-    def _parse_hadith(hadith_data: Dict[str, Any], collection_name: str) -> Hadith:
-        """Parse a single hadith from data"""
-        reference = hadith_data.get("reference", {})
-        
-        return Hadith(
-            hadith_number=hadith_data.get("hadithnumber", 0),
-            arabic_number=hadith_data.get("arabicnumber", 0),
-            text=hadith_data.get("text", ""),
-            collection_name=collection_name,
-            book_reference=reference.get("book") if isinstance(reference, dict) else None,
-            grades=hadith_data.get("grades", []),
-            reference=reference
-        )
-    
-    @staticmethod
-    def search_hadiths_by_keyword(
-        response_data: Dict[str, Any],
-        collection_id: str,
-        keyword: str,
-        limit: int = 10
-    ) -> List[Hadith]:
-        """
-        Search hadiths by keyword in text
-        
-        Args:
-            response_data: Raw JSON response from API
-            collection_id: Collection identifier
-            keyword: Keyword to search for
-            limit: Maximum number of results
+    def _parse_verse_result(result: Dict[str, Any]) -> Optional[QuranVerse]:
+        """Parse a single verse from search results"""
+        try:
+            # Extract verse data
+            verse_key = result.get("verse_key", "")
+            if not verse_key:
+                return None
             
-        Returns:
-            List of matching Hadith objects
-        """
-        parsed = HadithAPIParser.parse_collection_response(response_data, collection_id)
-        
-        if not parsed["success"]:
-            return []
-        
-        keyword_lower = keyword.lower()
-        matching_hadiths = []
-        
-        for hadith in parsed["hadiths"]:
-            if keyword_lower in hadith.text.lower():
-                matching_hadiths.append(hadith)
-                if len(matching_hadiths) >= limit:
-                    break
-        
-        return matching_hadiths
-    
-    @staticmethod
-    def get_hadith_by_number(
-        response_data: Dict[str, Any],
-        collection_id: str,
-        hadith_number: int
-    ) -> Optional[Hadith]:
-        """
-        Get a specific hadith by its number
-        
-        Args:
-            response_data: Raw JSON response from API
-            collection_id: Collection identifier
-            hadith_number: Hadith number to find
+            # Parse verse key (format: "chapter:verse")
+            chapter, verse = map(int, verse_key.split(":"))
             
-        Returns:
-            Hadith object or None if not found
-        """
-        parsed = HadithAPIParser.parse_collection_response(response_data, collection_id)
-        
-        if not parsed["success"]:
+            # Extract translations
+            translations = result.get("translations", [])
+            translation_text = ""
+            translator_name = None
+            translation_id = None
+            
+            if translations:
+                # Get first translation
+                trans = translations[0]
+                translation_text = QuranAPIParser._clean_html(
+                    trans.get("text", "")
+                )
+                translator_name = trans.get("resource_name")
+                translation_id = trans.get("resource_id")
+            
+            # Extract verse text (Arabic)
+            text_uthmani = result.get("text", "")
+            text_simple = result.get("text_simple", text_uthmani)
+            
+            # Extract chapter info
+            chapter_info = result.get("chapter", {})
+            
+            # Determine revelation type
+            revelation = chapter_info.get("revelation_place", "").lower()
+            if "makkah" in revelation or "mecca" in revelation:
+                rev_type = RevelationType.MECCAN
+            elif "madinah" in revelation or "medina" in revelation:
+                rev_type = RevelationType.MEDINAN
+            else:
+                rev_type = RevelationType.UNKNOWN
+            
+            # Create verse object
+            verse = QuranVerse(
+                verse_key=verse_key,
+                text_uthmani=text_uthmani,
+                text_simple=text_simple,
+                text_translation=translation_text,
+                verse_number=result.get("verse_id", 0),
+                verse_in_surah=verse,
+                surah_number=chapter,
+                surah_name_arabic=chapter_info.get("name_arabic", ""),
+                surah_name_english=chapter_info.get("name_simple", ""),
+                surah_name_translation=chapter_info.get("translated_name", {}).get("name", ""),
+                revelation_type=rev_type,
+                juz_number=result.get("juz_number"),
+                hizb_number=result.get("hizb_number"),
+                page_number=result.get("page_number"),
+                translator_name=translator_name,
+                translation_id=translation_id,
+                highlighted_text=result.get("highlighted", "")
+            )
+            
+            return verse
+            
+        except Exception as e:
+            logger.error(f"❌ Error parsing verse result: {e}")
             return None
-        
-        for hadith in parsed["hadiths"]:
-            if hadith.hadith_number == hadith_number:
-                return hadith
-        
-        return None
     
     @staticmethod
-    def format_hadith_for_display(hadith: Hadith) -> str:
+    def parse_verse_by_key_response(response: Dict[str, Any]) -> Optional[QuranVerse]:
         """
-        Format a hadith for user-friendly display
+        Parse response from verse by key endpoint
         
         Args:
-            hadith: Hadith object
+            response: Raw API response
+            
+        Returns:
+            QuranVerse object or None
+        """
+        try:
+            verse_data = response.get("verse", {})
+            if not verse_data:
+                return None
+            
+            # Similar parsing logic as search results
+            return QuranAPIParser._parse_verse_result(verse_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Error parsing verse by key: {e}")
+            return None
+    
+    @staticmethod
+    def parse_verses_by_chapter_response(response: Dict[str, Any]) -> List[QuranVerse]:
+        """
+        Parse response from verses by chapter endpoint
+        
+        Args:
+            response: Raw API response
+            
+        Returns:
+            List of QuranVerse objects
+        """
+        verses = []
+        
+        try:
+            verses_data = response.get("verses", [])
+            
+            for verse_data in verses_data:
+                verse = QuranAPIParser._parse_verse_result(verse_data)
+                if verse:
+                    verses.append(verse)
+            
+            logger.info(f"✅ Parsed {len(verses)} verses from chapter")
+            
+        except Exception as e:
+            logger.error(f"❌ Error parsing chapter verses: {e}")
+        
+        return verses
+    
+    @staticmethod
+    def _clean_html(text: str) -> str:
+        """Remove HTML tags from text"""
+        if not text:
+            return ""
+        
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Decode HTML entities
+        text = text.replace("&quot;", '"')
+        text = text.replace("&amp;", "&")
+        text = text.replace("&lt;", "<")
+        text = text.replace("&gt;", ">")
+        text = text.replace("&#39;", "'")
+        
+        return text.strip()
+    
+    @staticmethod
+    def format_verses_for_display(verses: List[QuranVerse], limit: Optional[int] = None) -> str:
+        """
+        Format multiple verses for display
+        
+        Args:
+            verses: List of verses
+            limit: Maximum verses to display
             
         Returns:
             Formatted string
         """
-        grades_str = f"\nGrades: {', '.join(hadith.grades)}" if hadith.grades else ""
-        book_ref = f" - Book {hadith.book_reference}" if hadith.book_reference else ""
+        if not verses:
+            return "No verses found."
         
-        return f"""
-[HADITH] {hadith.collection_name}
-   Hadith #{hadith.hadith_number}{book_ref}{grades_str}
+        verses_to_show = verses[:limit] if limit else verses
+        
+        lines = [
+            f"📖 Found {len(verses)} verse(s):",
+            "=" * 60,
+            ""
+        ]
+        
+        for i, verse in enumerate(verses_to_show, 1):
+            lines.append(f"{i}. {verse.format_for_display(include_arabic=False)}")
+            lines.append("")
+        
+        if limit and len(verses) > limit:
+            lines.append(f"... and {len(verses) - limit} more verse(s)")
+        
+        return "\n".join(lines)
 
-"{hadith.text}"
-        """.strip()
 
+# ============================================================================
+# HADITH API PARSER
+# ============================================================================
 
-class IslamicDataAggregator:
-    """Aggregates and manages Quran and Hadith data"""
+class HadithAPIParser:
+    """
+    Parser for Sunnah.com API and other Hadith APIs
+    Handles multiple collections and formats
+    """
+    
+    # Collection mappings
+    COLLECTION_NAMES = {
+        "eng-bukhari": "Sahih al-Bukhari",
+        "eng-muslim": "Sahih Muslim",
+        "eng-abudawud": "Sunan Abi Dawud",
+        "eng-tirmidhi": "Jami` at-Tirmidhi",
+        "eng-nasai": "Sunan an-Nasa'i",
+        "eng-ibnmajah": "Sunan Ibn Majah",
+        "eng-malik": "Muwatta Malik",
+        "eng-riyadussaliheen": "Riyad as-Salihin",
+        "eng-adab": "Al-Adab Al-Mufrad",
+        "eng-bulugh": "Bulugh al-Maram",
+        "eng-nawawi40": "40 Hadith Nawawi",
+        "eng-qudsi40": "40 Hadith Qudsi"
+    }
+    
+    COLLECTION_ALIASES = {
+        "bukhari": "eng-bukhari",
+        "muslim": "eng-muslim",
+        "abu dawud": "eng-abudawud",
+        "tirmidhi": "eng-tirmidhi",
+        "nasai": "eng-nasai",
+        "ibn majah": "eng-ibnmajah"
+    }
     
     def __init__(self):
-        self.quran_parser = QuranAPIParser()
-        self.hadith_parser = HadithAPIParser()
+        """Initialize parser"""
+        logger.info("✅ HadithAPIParser initialized")
     
-    def search_quran(self, search_term: str, quran_response: Dict[str, Any], limit: int = 5) -> Dict[str, Any]:
+    @staticmethod
+    def parse_collection_response(
+        response: Union[Dict[str, Any], List[Dict[str, Any]]],
+        collection_id: str
+    ) -> List[HadithNarration]:
         """
-        Search Quran and return formatted results
+        Parse Hadith API collection response
         
         Args:
-            search_term: Search query
-            quran_response: Raw API response
-            limit: Maximum results
-            
-        Returns:
-            Formatted search results
-        """
-        parsed = self.quran_parser.parse_search_response(quran_response)
-        
-        return {
-            "search_term": search_term,
-            "total_found": parsed["total_matches"],
-            "verses_returned": len(parsed["verses"][:limit]),
-            "verses": [v.to_dict() for v in parsed["verses"][:limit]],
-            "formatted_verses": [
-                self.quran_parser.format_verse_for_display(v)
-                for v in parsed["verses"][:limit]
-            ]
-        }
-    
-    def search_hadith(
-        self,
-        keyword: str,
-        hadith_response: Dict[str, Any],
-        collection_id: str,
-        limit: int = 5
-    ) -> Dict[str, Any]:
-        """
-        Search Hadith collection and return formatted results
-        
-        Args:
-            keyword: Search keyword
-            hadith_response: Raw API response
+            response: Raw API response (dict or list)
             collection_id: Collection identifier
-            limit: Maximum results
             
         Returns:
-            Formatted search results
+            List of HadithNarration objects
         """
-        matching_hadiths = self.hadith_parser.search_hadiths_by_keyword(
-            hadith_response,
-            collection_id,
-            keyword,
-            limit
-        )
+        hadiths = []
         
-        return {
-            "keyword": keyword,
-            "collection": self.hadith_parser.COLLECTION_NAMES.get(collection_id, collection_id),
-            "total_found": len(matching_hadiths),
-            "hadiths": [h.to_dict() for h in matching_hadiths],
-            "formatted_hadiths": [
-                self.hadith_parser.format_hadith_for_display(h)
-                for h in matching_hadiths
-            ]
-        }
+        try:
+            # Handle different response formats
+            if isinstance(response, dict):
+                hadith_data = response.get("hadiths", response.get("data", []))
+            elif isinstance(response, list):
+                hadith_data = response
+            else:
+                logger.error(f"❌ Unexpected response type: {type(response)}")
+                return []
+            
+            logger.info(f"📥 Parsing {len(hadith_data)} hadiths from {collection_id}")
+            
+            collection_name = HadithAPIParser.COLLECTION_NAMES.get(
+                collection_id,
+                collection_id
+            )
+            
+            for data in hadith_data:
+                try:
+                    hadith = HadithAPIParser._parse_hadith(data, collection_id, collection_name)
+                    if hadith:
+                        hadiths.append(hadith)
+                except Exception as e:
+                    logger.error(f"❌ Error parsing hadith: {e}")
+                    continue
+            
+            logger.info(f"✅ Successfully parsed {len(hadiths)} hadiths")
+            
+        except Exception as e:
+            logger.error(f"❌ Error parsing collection response: {e}")
+        
+        return hadiths
     
-    def get_guidance_package(
-        self,
-        quran_search_term: str,
-        hadith_keyword: str,
-        quran_response: Dict[str, Any],
-        hadith_responses: Dict[str, Dict[str, Any]],
-        quran_limit: int = 3,
-        hadith_limit: int = 2
-    ) -> Dict[str, Any]:
+    @staticmethod
+    def _parse_hadith(
+        data: Dict[str, Any],
+        collection_id: str,
+        collection_name: str
+    ) -> Optional[HadithNarration]:
+        """Parse a single hadith from data"""
+        try:
+            # Extract hadith number
+            hadith_number = data.get("hadithNumber", data.get("hadithnumber", 0))
+            if isinstance(hadith_number, str):
+                # Extract numeric part
+                hadith_number = int(re.search(r'\d+', hadith_number).group())
+            
+            # Extract book info
+            book_number = data.get("book", data.get("bookNumber", 0))
+            book_name = data.get("bookName", data.get("book_name", ""))
+            
+            # Extract chapter info
+            chapter_number = data.get("chapter", data.get("chapterNumber"))
+            chapter_name = data.get("chapterName", data.get("chapter_name"))
+            
+            # Extract text
+            english_text = ""
+            arabic_text = None
+            
+            # Try different text field structures
+            if "hadith" in data:
+                hadith_texts = data["hadith"]
+                if isinstance(hadith_texts, list):
+                    for text_obj in hadith_texts:
+                        if text_obj.get("lang") == "en":
+                            english_text = text_obj.get("body", "")
+                        elif text_obj.get("lang") == "ar":
+                            arabic_text = text_obj.get("body")
+                elif isinstance(hadith_texts, dict):
+                    english_text = hadith_texts.get("body", "")
+            
+            if not english_text:
+                english_text = data.get("text", data.get("body", ""))
+            
+            if not arabic_text:
+                arabic_text = data.get("arabicText", data.get("arabic"))
+            
+            # Clean HTML from text
+            english_text = HadithAPIParser._clean_html(english_text)
+            if arabic_text:
+                arabic_text = HadithAPIParser._clean_html(arabic_text)
+            
+            # Extract grades
+            grades = []
+            primary_grade = None
+            
+            if "grades" in data:
+                grades_data = data["grades"]
+                if isinstance(grades_data, list):
+                    for grade_obj in grades_data:
+                        if isinstance(grade_obj, dict):
+                            grade = grade_obj.get("grade", "")
+                        else:
+                            grade = str(grade_obj)
+                        grades.append(grade)
+                        
+                        # Determine primary grade
+                        if not primary_grade:
+                            grade_lower = grade.lower()
+                            if "sahih" in grade_lower:
+                                primary_grade = HadithGrade.SAHIH
+                            elif "hasan" in grade_lower:
+                                primary_grade = HadithGrade.HASAN
+                            elif "daif" in grade_lower or "weak" in grade_lower:
+                                primary_grade = HadithGrade.DAIF
+            
+            # Extract references
+            references = data.get("reference", data.get("references", {}))
+            
+            # Extract narrator chain if available
+            narrator_chain = []
+            if "chain" in data:
+                narrator_chain = data["chain"]
+            
+            # Create hadith object
+            hadith = HadithNarration(
+                hadith_number=hadith_number,
+                book_number=book_number,
+                chapter_number=chapter_number,
+                arabic_text=arabic_text,
+                english_text=english_text,
+                collection_name=collection_name,
+                collection_id=collection_id,
+                book_name=book_name,
+                chapter_name=chapter_name,
+                grades=grades,
+                primary_grade=primary_grade,
+                narrator_chain=narrator_chain,
+                references=references if isinstance(references, dict) else {},
+                volume_number=data.get("volume")
+            )
+            
+            return hadith
+            
+        except Exception as e:
+            logger.error(f"❌ Error parsing hadith data: {e}")
+            return None
+    
+    @staticmethod
+    def search_by_text(
+        hadiths: List[HadithNarration],
+        keyword: str,
+        case_sensitive: bool = False,
+        limit: Optional[int] = None
+    ) -> List[HadithNarration]:
         """
-        Get a complete guidance package with Quran verses and Hadiths
+        Search hadiths by text content
         
         Args:
-            quran_search_term: Quran search term
-            hadith_keyword: Hadith search keyword
-            quran_response: Quran API response
-            hadith_responses: Dict of hadith collection responses
-            quran_limit: Max Quran verses
-            hadith_limit: Max hadiths per collection
+            hadiths: List of hadiths to search
+            keyword: Search keyword
+            case_sensitive: Whether search is case sensitive
+            limit: Maximum results to return
             
         Returns:
-            Complete guidance package
+            Filtered list of hadiths
         """
-        # Get Quran verses
-        quran_results = self.search_quran(quran_search_term, quran_response, quran_limit)
+        keyword_search = keyword if case_sensitive else keyword.lower()
+        results = []
         
-        # Get Hadiths from multiple collections
-        hadith_results = {}
-        for collection_id, response in hadith_responses.items():
-            hadiths = self.hadith_parser.search_hadiths_by_keyword(
-                response,
-                collection_id,
-                hadith_keyword,
-                hadith_limit
-            )
-            if hadiths:
-                hadith_results[collection_id] = {
-                    "collection_name": self.hadith_parser.COLLECTION_NAMES.get(collection_id, collection_id),
-                    "hadiths": [h.to_dict() for h in hadiths],
-                    "formatted": [self.hadith_parser.format_hadith_for_display(h) for h in hadiths]
-                }
+        for hadith in hadiths:
+            text_search = hadith.english_text if case_sensitive else hadith.english_text.lower()
+            
+            if keyword_search in text_search:
+                # Calculate relevance (simple word count)
+                relevance = text_search.count(keyword_search)
+                hadith.relevance_score = float(relevance)
+                hadith.matched_keywords = [keyword]
+                results.append(hadith)
+            
+            if limit and len(results) >= limit:
+                break
         
-        return {
+        # Sort by relevance
+        results.sort(key=lambda h: h.relevance_score or 0, reverse=True)
+        
+        return results
+    
+    @staticmethod
+    def filter_by_grade(
+        hadiths: List[HadithNarration],
+        min_grade: HadithGrade = HadithGrade.HASAN
+    ) -> List[HadithNarration]:
+        """Filter hadiths by minimum authenticity grade"""
+        grade_order = [
+            HadithGrade.SAHIH,
+            HadithGrade.HASAN,
+            HadithGrade.DAIF,
+            HadithGrade.MAWDU,
+            HadithGrade.UNKNOWN
+        ]
+        
+        min_index = grade_order.index(min_grade)
+        
+        return [
+            h for h in hadiths
+            if h.primary_grade and grade_order.index(h.primary_grade) <= min_index
+        ]
+    
+    @staticmethod
+    def _clean_html(text: str) -> str:
+        """Remove HTML tags and clean text"""
+        if not text:
+            return ""
+        
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Decode HTML entities
+        text = text.replace("&quot;", '"')
+        text = text.replace("&amp;", "&")
+        text = text.replace("&lt;", "<")
+        text = text.replace("&gt;", ">")
+        text = text.replace("&#39;", "'")
+        text = text.replace("&nbsp;", " ")
+        
+        # Remove extra whitespace
+        text = re.sub(r'\s+', ' ', text)
+        
+        return text.strip()
+    
+    @staticmethod
+    def format_hadiths_for_display(
+        hadiths: List[HadithNarration],
+        limit: Optional[int] = None
+    ) -> str:
+        """
+        Format multiple hadiths for display
+        
+        Args:
+            hadiths: List of hadiths
+            limit: Maximum hadiths to display
+            
+        Returns:
+            Formatted string
+        """
+        if not hadiths:
+            return "No hadiths found."
+        
+        hadiths_to_show = hadiths[:limit] if limit else hadiths
+        
+        lines = [
+            f"📚 Found {len(hadiths)} hadith(s):",
+            "=" * 60,
+            ""
+        ]
+        
+        for i, hadith in enumerate(hadiths_to_show, 1):
+            lines.append(f"{i}. {hadith.format_for_display(include_arabic=False)}")
+            lines.append("")
+        
+        if limit and len(hadiths) > limit:
+            lines.append(f"... and {len(hadiths) - limit} more hadith(s)")
+        
+        return "\n".join(lines)
+
+
+# ============================================================================
+# RESPONSE FORMATTER
+# ============================================================================
+
+class IslamicResponseFormatter:
+    """
+    Formats parsed data into user-friendly responses
+    Combines Quran and Hadith data for comprehensive guidance
+    """
+    
+    @staticmethod
+    def format_guidance_response(
+        query: str,
+        quran_verses: List[QuranVerse],
+        hadiths: List[HadithNarration],
+        ai_guidance: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Format complete guidance response
+        
+        Args:
+            query: Original user query
+            quran_verses: List of relevant Quran verses
+            hadiths: List of relevant hadiths
+            ai_guidance: Optional AI-generated guidance
+            
+        Returns:
+            Formatted response dictionary
+        """
+        response = {
+            "query": query,
             "timestamp": datetime.now().isoformat(),
-            "quran": quran_results,
-            "hadith": hadith_results,
+            "guidance": {},
+            "sources": {
+                "quran": [],
+                "hadith": []
+            },
             "summary": {
-                "quran_verses": len(quran_results["verses"]),
-                "hadith_collections": len(hadith_results),
-                "total_hadiths": sum(len(r["hadiths"]) for r in hadith_results.values())
+                "total_verses": len(quran_verses),
+                "total_hadiths": len(hadiths),
+                "has_ai_guidance": ai_guidance is not None
             }
         }
+        
+        # Add AI guidance if available
+        if ai_guidance:
+            response["guidance"]["ai"] = ai_guidance
+        
+        # Format Quran verses
+        for verse in quran_verses:
+            response["sources"]["quran"].append({
+                "reference": verse.to_citation(),
+                "text": verse.text_translation,
+                "url": verse.get_quran_com_url(),
+                "chapter": verse.surah_number,
+                "verse": verse.verse_in_surah,
+                "surah_name": verse.surah_name_english
+            })
+        
+        # Format Hadiths
+        for hadith in hadiths:
+            response["sources"]["hadith"].append({
+                "reference": hadith.to_citation(),
+                "text": hadith.english_text,
+                "url": hadith.get_sunnah_com_url(),
+                "collection": hadith.collection_name,
+                "hadith_number": hadith.hadith_number,
+                "grades": hadith.grades
+            })
+        
+        return response
+    
+    @staticmethod
+    def format_citation_list(
+        quran_verses: List[QuranVerse],
+        hadiths: List[HadithNarration]
+    ) -> str:
+        """Generate formatted citation list"""
+        lines = ["📚 References:", ""]
+        
+        if quran_verses:
+            lines.append("Quran:")
+            for v in quran_verses:
+                lines.append(f"  • {v.to_citation()}")
+            lines.append("")
+        
+        if hadiths:
+            lines.append("Hadith:")
+            for h in hadiths:
+                lines.append(f"  • {h.to_citation()}")
+        
+        return "\n".join(lines)
 
 
-# Example usage and testing
+# ============================================================================
+# MAIN PARSER INTERFACE
+# ============================================================================
+
+def parse_quran_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Main function to parse Quran API responses
+    Returns list of dictionaries for easy JSON serialization
+    """
+    parser = QuranAPIParser()
+    verses = parser.parse_search_response(response)
+    return [v.to_dict() for v in verses]
+
+
+def parse_hadith_response(response: Union[Dict, List], collection_id: str = "eng-bukhari") -> List[Dict[str, Any]]:
+    """
+    Main function to parse Hadith API responses
+    Returns list of dictionaries for easy JSON serialization
+    """
+    parser = HadithAPIParser()
+    hadiths = parser.parse_collection_response(response, collection_id)
+    return [h.to_dict() for h in hadiths]
+
+
+# ============================================================================
+# MODULE EXPORTS
+# ============================================================================
+
+__all__ = [
+    # Data classes
+    'QuranVerse',
+    'HadithNarration',
+    'SearchResult',
+    
+    # Enums
+    'RevelationType',
+    'HadithGrade',
+    'APISource',
+    
+    # Parsers
+    'QuranAPIParser',
+    'HadithAPIParser',
+    'IslamicResponseFormatter',
+    
+    # Main functions
+    'parse_quran_response',
+    'parse_hadith_response'
+]
+
+
 if __name__ == "__main__":
-    import json
-    import sys
-    
-    # Set console encoding to UTF-8 for Windows
-    if sys.platform == "win32":
-        try:
-            sys.stdout.reconfigure(encoding='utf-8')
-        except:
-            pass
-    
-    print("="*80)
-    print("ISLAMIC DATA PARSERS - DEMONSTRATION")
-    print("="*80)
-    
-    # Example: Parse Quran response
-    print("\n1. Quran API Parser Example")
-    print("-" * 40)
-    
-    try:
-        with open("api_responses/quran_search_Heaven.json", "r", encoding="utf-8") as f:
-            quran_data = json.load(f)
-        
-        parser = QuranAPIParser()
-        top_verses = parser.get_top_verses(quran_data, limit=3)
-        
-        print(f"Found {len(top_verses)} verses:")
-        for verse in top_verses:
-            formatted = parser.format_verse_for_display(verse)
-            # Handle encoding errors for Windows console
-            try:
-                print(f"\n{formatted}")
-            except UnicodeEncodeError:
-                print(f"\n{formatted.encode('ascii', 'replace').decode('ascii')}")
-    except FileNotFoundError:
-        print("Quran response file not found")
-    
-    # Example: Parse Hadith response
-    print("\n\n2. Hadith API Parser Example")
-    print("-" * 40)
-    
-    try:
-        with open("api_responses/hadith_eng-bukhari.json", "r", encoding="utf-8") as f:
-            hadith_data = json.load(f)
-        
-        hadith_parser = HadithAPIParser()
-        matching_hadiths = hadith_parser.search_hadiths_by_keyword(
-            hadith_data,
-            "eng-bukhari",
-            "faith",
-            limit=2
-        )
-        
-        print(f"Found {len(matching_hadiths)} hadiths about 'faith':")
-        for hadith in matching_hadiths:
-            formatted = hadith_parser.format_hadith_for_display(hadith)
-            # Handle encoding errors for Windows console
-            try:
-                print(f"\n{formatted}")
-            except UnicodeEncodeError:
-                print(f"\n{formatted.encode('ascii', 'replace').decode('ascii')}")
-    except FileNotFoundError:
-        print("Hadith response file not found")
-    
-    print("\n" + "="*80)
-    print("PARSERS READY FOR USE")
-    print("="*80)
-
+    # Test the parsers
+    print("✅ Islamic API Parsers Module Loaded")
+    print(f"📊 Exports: {', '.join(__all__)}")

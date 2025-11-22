@@ -1,0 +1,22 @@
+# IslamicGuideAI Backend Requirements
+# Python dependencies for FastAPI backend and Vercel deployment
+
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Google Gemini AI
+google-generativeai>=0.3.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# HTTP Requests for external APIs
+requests>=2.31.0
+
+# Data Validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# CORS Support (already included in FastAPI but explicit for clarity)
+python-multipart>=0.0.6
