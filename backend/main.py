@@ -413,17 +413,16 @@ async def save_api_key(request: Request):
     Save API key to .env file (development only).
     Note: This endpoint is disabled in serverless/production environments.
     """
+    # Check serverless mode FIRST, before any other operations
+    if IS_SERVERLESS:
+        logger.warning("[SAVE-API-KEY] Attempted to save API key in serverless environment")
+        raise HTTPException(
+            status_code=403,
+            detail="API key saving is disabled in production. Please set GEMINI_API_KEY environment variable in Vercel dashboard."
+        )
+    
     try:
-        logger.info("[SAVE-API-KEY] Endpoint called")
-        logger.info(f"[SAVE-API-KEY] IS_SERVERLESS: {IS_SERVERLESS}")
-        
-        # Disable in serverless environment
-        if IS_SERVERLESS:
-            logger.warning("[SAVE-API-KEY] Attempted to save API key in serverless environment")
-            raise HTTPException(
-                status_code=403,
-                detail="API key saving is disabled in production. Please set GEMINI_API_KEY environment variable in Vercel dashboard."
-            )
+        logger.info("[SAVE-API-KEY] Endpoint called in development mode")
         
         # Parse request body
         try:
