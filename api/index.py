@@ -11,7 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 print(f"Current working directory: {os.getcwd()}")
 print(f"Python path: {sys.path}")
 
-from backend.main import app
+try:
+    from backend.main import app
+except Exception as e:
+    import traceback
+    print(f"Error importing backend.main: {e}")
+    traceback.print_exc()
+    raise e
 
 # Vercel expects a handler function or an ASGI app
 # Since FastAPI is already an ASGI app, we can export it directly
