@@ -19,10 +19,11 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
 # CORS Support
-# CORS Support
 python-multipart>=0.0.6
 
 # Caching & Rate Limiting
 redis>=5.0.0
 slowapi>=0.1.9
 yake>=0.6.0
+pinecone>=8.0.0
+pinecone-client>=0.2.1

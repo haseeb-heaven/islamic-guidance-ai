@@ -32,6 +32,7 @@ try:
     from slowapi.errors import RateLimitExceeded
     import google.generativeai as genai
     from typing import Optional, List, Dict
+	from backend.vector_search import search_semantic_async
     print("[IMPORT] Core dependencies loaded successfully", file=sys.stdout, flush=True)
 except ImportError as ex:
     print(f"[CRITICAL] Failed to import core dependencies: {ex}", file=sys.stderr, flush=True)
@@ -153,6 +154,14 @@ except ImportError:
     except ImportError as e:
         print(f"[WARNING] Custom keyword extractor not available: {e}", file=sys.stderr, flush=True)
         KeywordExtractorNoDeps = None
+
+
+# Update the Pydantic model
+class GuidanceRequest(BaseModel):
+    query: str
+    source: str = "both"
+    hadith_collection: List[str] = []
+    use_semantic: bool = True  # NEW: Enable semantic search by default
 
 # =============================================================================
 # VERCEL KV-BASED RATE LIMITER (Issue #5 - P0)
