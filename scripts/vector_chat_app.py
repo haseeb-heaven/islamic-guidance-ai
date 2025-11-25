@@ -88,9 +88,10 @@ class SearchEngine:
             # We use the SAME model as the index to ensure 1024 dimensions
             embedding_response = self.pc.inference.embed(
                 model=self.config.embedding_model,
-                inputs=[query],
+                inputs=[f"Instruct: Find relevant Quran verses or Hadiths that provide answers, comfort, or rulings regarding the user's situation in areas such as faith, emotional well-being, daily life, relationships, or hardship.\nQuery: {query}"],
                 parameters={"input_type": "query"}
             )
+
             query_vector = embedding_response[0]['values']
 
             # 2. Build Metadata Filters
@@ -178,23 +179,18 @@ class UserInterface:
         print(f"\n🎯 RESULTS FOR: '{query}'")
         print("=" * 70)
 
-        for result in results:
-            quality_emoji = "✅" if result['score'] >= MIN_SCORE else "⚠️"
-            source_emoji = "📖" if result['source'] == 'quran' else "📚"
-            
-            print(f"\n{quality_emoji} Result #{result['rank']} | Score: {result['score']:.4f}")
-            print(f"   {source_emoji} Source: {result['source'].upper()}")
-            
-            if result['source'] == 'hadith':
-                print(f"   Collection: {result['collection'].capitalize()}")
-            
-            # Truncate text nicely
-            text = result['text']
-            if len(text) > 200:
-                text = text[:200] + "..."
-            
-            print(f"   Text: {text}")
-            print(f"   URL:  {result['url']}")
+        for i, result in enumerate(results, 1):
+            if result['score'] >= MIN_SCORE:
+                emoji = "📖" if result['source'] == 'quran' else "📚"
+                print(f"\n{emoji} Result #{i} | Score: {result['score']:.4f}")
+                print(f"   Source: {result['source'].upper()}")
+                print(f"   Text: {result['text'][:150]}...")
+                print(f"   URL: {result['url']}")
+            else:
+                print(f"\n❌ Result #{i} | Score: {result['score']:.4f}")
+                print(f"   Source: {result['source'].upper()}")
+                print(f"   Text: {result['text'][:150]}...")
+                print(f"   URL: {result['url']}")
 
     @staticmethod
     def get_input(prompt: str) -> str:

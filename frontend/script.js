@@ -135,6 +135,32 @@ function truncateJSON(obj, maxLength = 150) {
     return obj;
 }
 
+function formatVectorResults(results) {
+    if (!results || results.length === 0) {
+        return { 
+            answer: "No relevant results found in the vector database.", 
+            citations: [] 
+        };
+    }
+    
+    let answerText = `**Found ${results.length} relevant results:**\n\n`;
+    const citations = [];
+    
+    results.forEach(r => {
+        const emoji = r.source === 'quran' ? '📖' : '📚';
+        answerText += `${emoji} **Result #${r.rank}** (Score: ${r.score})\n`;
+        answerText += `> ${r.text}\n`;
+        answerText += `*Source: ${r.source.toUpperCase()}*\n\n`;
+        
+        citations.push({
+            title: `${r.source.toUpperCase()} (Score: ${r.score})`,
+            url: r.url
+        });
+    });
+    
+    return { answer: answerText, citations: citations };
+}
+
 // =============================================================================
 // LOGGING WITH CIRCUIT BREAKER (Issue #8 & #12 - P1/P2)
 // =============================================================================
@@ -215,28 +241,44 @@ async function fetchGuidance(query) {
     const selectedHadithBooks = HADITH_COLLECTIONS[hadithCollectionKey] || [];
     const hadithCodes = selectedHadithBooks.map(book => book.code);
     
+    const isVectorSearch = source === 'external';
+
     logToServer('info', '='.repeat(80));
-    logToServer('info', '[USER ACTION] Starting guidance request');
+    logToServer('info', `[USER ACTION] Starting ${isVectorSearch ? 'Vector Search' : 'Guidance'} request`);
     logToServer('info', `[REQUEST] Query: "${query}"`);
     logToServer('info', `[REQUEST] Source: ${source}`);
-    logToServer('info', `[REQUEST] Hadith Collection: ${hadithCollectionKey}`);
-    logToServer('info', `[REQUEST] Hadith Books: ${hadithCodes.join(', ')}`);
-    logToServer('info', '='.repeat(80));
     
     try {
-        const requestBody = {
-            query,
-            source,
-            hadith_collection: hadithCodes
-        };
+        let requestBody;
+        let endpoint;
+
+        if (isVectorSearch) {
+            endpoint = '/api/vector-search';
+            const limit = parseInt(localStorage.getItem('searchLimit') || '3');
+            const highQuality = localStorage.getItem('highQualityOnly') === 'true';
+            requestBody = {
+                query: query,
+                source: 'both',
+                collections: hadithCodes,
+                limit: limit,
+                score_threshold: highQuality ? 0.75 : 0.0
+            };
+        } else {
+            endpoint = '/api/guidance';
+            requestBody = {
+                query,
+                source,
+                hadith_collection: hadithCodes
+            };
+        }
         
-        logToServer('info', `[API REQUEST] Sending POST to /api/guidance`);
+        logToServer('info', `[API REQUEST] Sending POST to ${endpoint}`);
         logToServer('info', `[API REQUEST] Body: ${JSON.stringify(requestBody)}`);
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
         
-        const response = await fetch('/api/guidance', {
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody),
@@ -250,7 +292,6 @@ async function fetchGuidance(query) {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
             logToServer('error', `[API ERROR] Status ${response.status}`);
-            logToServer('error', `[API ERROR] Response: ${JSON.stringify(errorData)}`);
             
             // Return structured error for different status codes
             if (response.status === 400) {
@@ -258,7 +299,7 @@ async function fetchGuidance(query) {
             } else if (response.status === 429) {
                 return { error: 'Rate limit', message: 'API quota exceeded. Please try again later.' };
             } else if (response.status === 503) {
-                return { error: 'Service unavailable', message: 'AI model not available. Please check API key in Settings.' };
+                return { error: 'Service unavailable', message: 'Service not available. Please check configuration.' };
             } else if (response.status === 500) {
                 return { error: 'Server error', message: errorData.detail || 'Internal server error occurred' };
             }
@@ -269,20 +310,13 @@ async function fetchGuidance(query) {
         const data = await response.json();
         logToServer('info', '[API RESPONSE] Data parsed successfully');
         
+        if (isVectorSearch) {
+            return formatVectorResults(data.results);
+        }
+
         // Log truncated response for readability
         const truncatedData = truncateJSON(data, 150);
         logToServer('info', `[API RESPONSE] Data: ${JSON.stringify(truncatedData, null, 2)}`);
-        
-        // Log citations count
-        if (data.citations && Array.isArray(data.citations)) {
-            logToServer('info', `[API RESPONSE] Citations count: ${data.citations.length}`);
-            data.citations.forEach((citation, idx) => {
-                logToServer('info', `[CITATION ${idx + 1}] ${citation.title} - ${citation.url}`);
-            });
-        }
-        
-        logToServer('info', '[SUCCESS] Returning data to display');
-        logToServer('info', '='.repeat(80));
         
         return data;
         
@@ -293,8 +327,6 @@ async function fetchGuidance(query) {
         }
         
         logToServer('error', `[NETWORK ERROR] ${err.message}`);
-        logToServer('error', `[NETWORK ERROR] Stack: ${err.stack}`);
-        logToServer('info', '='.repeat(80));
         
         return { 
             error: 'Network error', 

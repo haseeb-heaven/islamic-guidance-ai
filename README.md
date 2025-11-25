@@ -1,5 +1,7 @@
 # Islamic Guidance AI
 
+🚀 **Now with AI-Powered Vector Search (RAG)** - Semantically accurate results using Pinecone Vector Database
+
 > [!WARNING]
 > **⚠️ This app is BETA. All AI responses must be manually verified. Use links provided to consult authentic sources.**
 
@@ -18,8 +20,9 @@
    # Copy environment template
    cp .env.example .env
    
-   # Edit .env and add your Gemini API key
-   # Get key from: https://aistudio.google.com/api-keys
+   # Edit .env and add your API keys:
+   # - GEMINI_API_KEY: Get from https://aistudio.google.com/api-keys
+   # - PINECONE_API_KEY: Get from https://app.pinecone.io/
    ```
 
 3. **Install dependencies**
@@ -27,12 +30,21 @@
    pip install -r requirements.txt
    ```
 
-4. **Run the application**
+4. **Populate Vector Database (Required for Vector Search)**
+   ```bash
+   # Run the upload script to populate Pinecone with Quran and Hadith data
+   python scripts/upload_pinecone.py
+   
+   # This is a one-time setup step that creates vector embeddings
+   # for semantic search capabilities
+   ```
+
+5. **Run the application**
    ```bash
    python -m uvicorn backend.main:app --reload --port 8000
    ```
 
-5. **Open in browser**
+6. **Open in browser**
    ```
    http://localhost:8000
    ```
@@ -53,10 +65,13 @@
    - Import your GitHub repository
    - Vercel auto-detects configuration
 
-3. **Add Environment Variable**
+3. **Add Environment Variables**
    - In Vercel Dashboard: Settings → Environment Variables
-   - Add `GEMINI_API_KEY` with your API key
+   - Add `GEMINI_API_KEY` with your Gemini API key
+   - Add `PINECONE_API_KEY` with your Pinecone API key
    - Select all environments (Production, Preview, Development)
+   
+   **Note**: Before deploying, ensure you've run `python scripts/upload_pinecone.py` locally to populate your Pinecone vector database with Quran and Hadith data.
 
 4. **Deploy!**
    - Click Deploy button
@@ -292,19 +307,27 @@ Receive frontend logs.
 
 - **Backend**: Python, FastAPI, Uvicorn
 - **AI**: Google Gemini 2.0 Flash
+- **Vector Database**: Pinecone (RAG - Retrieval-Augmented Generation)
 - **Frontend**: HTML, CSS, Vanilla JavaScript
 - **APIs**: Quran.com API, Sunnah.com API
 - **Deployment**: Vercel Serverless Functions
 
+### 🔍 Key Features
+
+- **Dynamic Vector Database**: Uses Pinecone and RAG (Retrieval-Augmented Generation) for semantically accurate results, moving beyond simple keyword matching.
+- **Intelligent Search**: Vector embeddings enable contextual understanding of queries for more relevant Islamic guidance.
+- **Scalable Architecture**: Pinecone's cloud-native vector database ensures fast, reliable searches at any scale.
+
 ## 📝 Environment Variables
 
-| Variable         | Description               | Required |
-|------------------|---------------------------|----------|
-| `GEMINI_API_KEY` | Google Gemini API key     | Yes      |
-| `API_KEY`        | Alias for Gemini API key  | No       |
-| `THEME`          | Default theme (light/dark)| No       |
-| `GEMINI_MODEL`   | Default Gemini model      | No       |
-| `PORT`           | Port number               | No       |
+| Variable           | Description                        | Required |
+|--------------------|------------------------------------|----------|
+| `GEMINI_API_KEY`   | Google Gemini API key              | Yes      |
+| `PINECONE_API_KEY` | Pinecone Vector Database API key   | Yes      |
+| `API_KEY`          | Alias for Gemini API key           | No       |
+| `THEME`            | Default theme (light/dark)         | No       |
+| `GEMINI_MODEL`     | Default Gemini model               | No       |
+| `PORT`             | Port number                        | No       |
 
 
 ## 🧪 Testing

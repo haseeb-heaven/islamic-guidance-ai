@@ -32,7 +32,7 @@ try:
     from slowapi.errors import RateLimitExceeded
     import google.generativeai as genai
     from typing import Optional, List, Dict
-	from backend.vector_search import search_semantic_async
+
     print("[IMPORT] Core dependencies loaded successfully", file=sys.stdout, flush=True)
 except ImportError as ex:
     print(f"[CRITICAL] Failed to import core dependencies: {ex}", file=sys.stderr, flush=True)
@@ -114,6 +114,18 @@ except ImportError:
         print(f"[CRITICAL] Could not import services: {e}", file=sys.stderr)
         raise ImportError(f"Failed to import required services module: {e}")
 
+# Import vector search service
+try:
+    from backend.vector_search import search_semantic_async
+except ImportError:
+    try:
+        from vector_search import search_semantic_async
+    except ImportError as e:
+        print(f"[WARNING] Could not import vector_search: {e}", file=sys.stderr)
+        # Define a dummy function that returns empty results
+        async def search_semantic_async(*args, **kwargs):
+            return []
+
 # Import cache service
 try:
     from backend.cache import cache
@@ -131,6 +143,19 @@ except ImportError:
             async def delete(self, k): pass
             async def clear_pattern(self, p): pass
         cache = MockCache()
+
+# Import Vector Search Service
+try:
+    from backend.vector_service.vector_search import SearchEngine
+except ImportError:
+    try:
+        from vector_service.vector_search import SearchEngine
+    except ImportError:
+        SearchEngine = None
+        print("[WARNING] Vector search service not available", file=sys.stderr)
+
+# Initialize Vector Search Engine
+vector_search_engine = SearchEngine() if SearchEngine else None
 
 # =============================================================================
 # KEYWORD EXTRACTION LIBRARIES - YAKE + CUSTOM FALLBACK (Issue #4 - P0)
@@ -157,11 +182,7 @@ except ImportError:
 
 
 # Update the Pydantic model
-class GuidanceRequest(BaseModel):
-    query: str
-    source: str = "both"
-    hadith_collection: List[str] = []
-    use_semantic: bool = True  # NEW: Enable semantic search by default
+
 
 # =============================================================================
 # VERCEL KV-BASED RATE LIMITER (Issue #5 - P0)
@@ -718,6 +739,15 @@ class GuidanceRequest(BaseModel):
     query: str
     source: str = "both"  # Options: internal, external, both
     hadith_collection: Optional[List[str]] = None
+    use_semantic: bool = True  # NEW: Enable semantic search by default
+
+class VectorSearchRequest(BaseModel):
+    """Request model for vector search endpoint"""
+    query: str
+    source: str = "both"
+    collections: Optional[List[str]] = None
+    limit: int = 3
+    score_threshold: float = 0.0
 
 class LogRequest(BaseModel):
     """Request model for frontend logging"""
@@ -842,383 +872,131 @@ async def log_frontend(request: LogRequest):
 @app.post("/api/guidance")
 async def get_guidance(request: GuidanceRequest, req: Request):
     """
-    Main endpoint for AI-powered Islamic guidance (FULLY OPTIMIZED with YAKE).
-    
-    All P0-P3 issues addressed + YAKE integration:
-    - Issue #1: Search timeout reduced to 6s
-    - Issue #2: Response size validation before return
-    - Issue #3: Semaphore limiting concurrent hadith fetches to 5
-    - Issue #4: YAKE keyword extraction (fast, no API quota usage)
-    - Issue #5: Vercel KV-based rate limiting
-    - Issue #10: Cache error handling with fallback
-    - Issue #11: Retry logic and circuit breaker in services.py
-    - Issue #13: Request deduplication via cache
-    - Issue #22: Request ID tracking
+    Enhanced guidance endpoint with semantic search
+    Dual mode: Vector search (default) OR Keyword search (fallback)
     """
-    # Generate unique request ID for tracking (Issue #22 - P3)
-    request_id = str(uuid.uuid4())
-    
-    print("="*80, file=sys.stdout, flush=True)
-    print(f"[REQUEST {request_id}] New guidance request", file=sys.stdout, flush=True)
-    print(f"[GUIDANCE] Query: {request.query}", file=sys.stdout, flush=True)
-    print(f"[GUIDANCE] Source: {request.source}, Collections: {request.hadith_collection or 'default'}", file=sys.stdout, flush=True)
-    print("="*80, file=sys.stdout, flush=True)
-    
-    # Validation
-    if not request.query or len(request.query) < 10:
-        print(f"[REQUEST {request_id}] Query too short", file=sys.stderr, flush=True)
-        raise HTTPException(
-            status_code=400,
-            detail="Query too short. Please provide at least 10 characters."
-        )
-    
-    # Vercel KV-based rate limiting (Issue #5 - P0)
-    client_ip = get_remote_address(req)
-    if not await vercel_rate_limiter.check_rate_limit(client_ip):
-        print(f"[REQUEST {request_id}] Rate limit exceeded for {client_ip}", file=sys.stderr, flush=True)
-        raise HTTPException(
-            status_code=429,
-            detail="Rate limit exceeded. Please try again later."
-        )
-    
-    # Lazy load model
-    model = get_gemini_model()
-    if not model:
-        print(f"[REQUEST {request_id}] Gemini model not available", file=sys.stderr, flush=True)
-        raise HTTPException(
-            status_code=503,
-            detail="AI model not available. Please check API key configuration."
-        )
-    
-    # Request deduplication via cache (Issue #13 - P2)
-    try:
-        collections_key = ",".join(sorted(request.hadith_collection or []))
-        cache_key = f"guidance_response:{request.query}:{request.source}:{collections_key}"
-        
-        cached_response = await cache.get(cache_key)
-        if cached_response:
-            print(f"[REQUEST {request_id}] Cache hit for query", file=sys.stdout, flush=True)
-            return cached_response
-    except Exception as e:
-        # Cache error handling with fallback (Issue #10 - P1)
-        print(f"[REQUEST {request_id}] Cache error (continuing without cache): {e}", file=sys.stderr, flush=True)
+    # Generate unique request ID for tracking
+    request_id = str(uuid.uuid4())[:8]
+    print(f"[API {request_id}] Guidance request: '{request.query[:50]}'", file=sys.stdout, flush=True)
     
     try:
-        context_text = ""
-        citations = []
-        quran_results = []
-        unique_hadiths = []
+        # Vercel KV-based rate limiting
+        client_ip = get_remote_address(req)
+        if not await vercel_rate_limiter.check_rate_limit(client_ip):
+            print(f"[API {request_id}] Rate limit exceeded for {client_ip}", file=sys.stderr, flush=True)
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+        search_results = []
         
-        # =====================================================================
-        # MODE 1: EXTERNAL SOURCES ONLY (No Gemini API)
-        # =====================================================================
-        if request.source == "external":
-            print(f"[REQUEST {request_id}] EXTERNAL MODE: Using only Quran + Hadith APIs (NO Gemini)", file=sys.stdout, flush=True)
+        # Choose search method
+        if request.use_semantic:
+            # NEW: Semantic search using Pinecone
+            print(f"[API {request_id}] Using SEMANTIC search", file=sys.stdout, flush=True)
+            search_results = await search_semantic_async(
+                query=request.query,
+                top_k=5,
+                source_filter=request.source if request.source != "both" else None,
+                collection_filter=request.hadith_collection if request.hadith_collection else None
+            )
+        else:
+            # EXISTING: Keyword search using REST APIs
+            print(f"[API {request_id}] Using KEYWORD search (fallback)", file=sys.stdout, flush=True)
             
-            # Extract keywords with YAKE (NO Gemini usage)
-            keyword_list = await extract_keywords_with_cache(request.query, None, use_gemini=False)
-            print(f"[REQUEST {request_id}] Using keywords: {keyword_list}", file=sys.stdout, flush=True)
+            quran_results = []
+            hadith_results = []
             
-            # Get selected Hadith collections
-            selected_collections = request.hadith_collection or [
-                "eng-bukhari",
-                "eng-muslim",
-                "eng-abudawud",
-                "eng-tirmidhi",
-                "eng-nasai",
-                "eng-ibnmajah"
-            ]
+            if request.source in ["both", "quran"]:
+                quran_results = await search_quran_async(request.query, max_results=3)
             
-            # Create search tasks with concurrency limit
-            semaphore = asyncio.Semaphore(5)
-            
-            async def search_with_semaphore(keyword):
-                async with semaphore:
-                    return await search_hadith_async(
-                        keyword,
-                        collections=selected_collections,
-                        max_per_collection=1
-                    )
-            
-            # Execute searches concurrently with timeout
-            try:
-                quran_task = search_quran_async(", ".join(keyword_list), max_results=3)
-                hadith_tasks = [search_with_semaphore(kw) for kw in keyword_list]
-                
-                search_timeout = 6
-                search_results = await asyncio.wait_for(
-                    asyncio.gather(quran_task, *hadith_tasks, return_exceptions=True),
-                    timeout=search_timeout
+            if request.source in ["both", "hadith"]:
+                hadith_results = await search_hadith_async(
+                    topic=request.query,
+                    collections=request.hadith_collection,
+                    max_per_collection=2
                 )
-                
-                # Process Quran results
-                if isinstance(search_results[0], Exception):
-                    print(f"[REQUEST {request_id}] Quran search failed: {search_results[0]}", file=sys.stderr, flush=True)
-                    quran_results = []
-                else:
-                    quran_results = search_results[0]
-                    print(f"[REQUEST {request_id}] Found {len(quran_results)} Quran verses", file=sys.stdout, flush=True)
-                
-                # Process Hadith results
-                all_hadith_results = []
-                for idx, result in enumerate(search_results[1:], 1):
-                    if isinstance(result, Exception):
-                        print(f"[REQUEST {request_id}] Hadith search {idx} failed: {result}", file=sys.stderr, flush=True)
-                    elif result:
-                        all_hadith_results.extend(result)
-                
-                # Remove duplicate hadiths
-                seen = set()
-                unique_hadiths = []
-                for hadith in all_hadith_results:
-                    key = (hadith.get('book', ''), hadith.get('hadithnumber', ''))
-                    if key not in seen:
-                        seen.add(key)
-                        unique_hadiths.append(hadith)
-                
-                print(f"[REQUEST {request_id}] Found {len(unique_hadiths)} unique hadiths", file=sys.stdout, flush=True)
-                
-            except asyncio.TimeoutError:
-                print(f"[REQUEST {request_id}] Search timed out after {search_timeout}s", file=sys.stderr, flush=True)
-                quran_results = []
-                unique_hadiths = []
             
-            # Build answer text from search results (NO Gemini processing)
-            answer_text = ""
-            
-            if quran_results:
-                answer_text += "**Quran Verses:**\n\n"
-                for verse in quran_results:
-                    verse_num = verse.get('number')
-                    surah_num = verse.get('surahNumber')
-                    verse_in_surah = verse.get('numberInSurah')
-                    if isinstance(verse_num, int) and 1 <= verse_num <= 6236 and surah_num and verse_in_surah:
-                        answer_text += f"- {verse['text']}\n  *(Surah {verse['surah']}, Verse {verse_in_surah})*\n\n"
-                        citations.append({
-                            "title": f"Quran {verse['surah']}:{verse_in_surah}",
-                            "url": f"https://quran.com/{surah_num}:{verse_in_surah}"
-                        })
-            
-            if unique_hadiths:
-                answer_text += f"**Hadiths ({len(unique_hadiths)} found):**\n\n"
-                for hadith in unique_hadiths:
-                    answer_text += f"- {hadith['text']}\n  *({hadith['source']}, Hadith #{hadith['hadithnumber']})*\n\n"
-                    citations.append({
-                        "title": f"{hadith['source']} - Hadith {hadith['hadithnumber']}",
-                        "url": hadith['citation_url']
-                    })
-            
-            # If no results found, provide message
-            if not answer_text:
-                answer_text = "No text found from Quran or Hadith for your query. However, you can explore the citations below if available."
-            
-            # Return data WITHOUT using Gemini
-            data = {
-                "answer": answer_text,
-                "citations": citations
+            # Normalize results to match semantic format
+            for r in quran_results:
+                search_results.append({
+                    'id': f"Quran {r.get('surahNumber')}:{r.get('numberInSurah')}",
+                    'score': 1.0,
+                    'source': 'quran',
+                    'text': r.get('text', ''),
+                    'url': f"https://quran.com/{r.get('surahNumber')}:{r.get('numberInSurah')}",
+                    'metadata': r
+                })
+                
+            for r in hadith_results:
+                search_results.append({
+                    'id': f"{r.get('source')} - Hadith {r.get('hadithnumber')}",
+                    'score': 1.0,
+                    'source': 'hadith',
+                    'text': r.get('text', ''),
+                    'url': r.get('citation_url', ''),
+                    'metadata': r
+                })
+        
+        # Handle no results
+        if not search_results:
+            return {
+                'answer': "I couldn't find relevant guidance for your question. Please try rephrasing or asking something else.",
+                'citations': [],
+                'search_method': 'semantic' if request.use_semantic else 'keyword'
             }
-            
-            print(f"[REQUEST {request_id}] EXTERNAL MODE: Returning {len(citations)} citations without Gemini processing", file=sys.stdout, flush=True)
-            
-            # Validate response size
-            data = validate_response_size(data)
-            
-            # Cache successful response
-            try:
-                await cache.set(cache_key, data, ttl=1800)
-            except Exception as e:
-                print(f"[REQUEST {request_id}] Cache write error: {e}", file=sys.stderr, flush=True)
-            
-            print(f"[REQUEST {request_id}] Success - returning external sources only", file=sys.stdout, flush=True)
-            print("="*80, file=sys.stdout, flush=True)
-            
-            return data
         
-        # =====================================================================
-        # MODE 2 & 3: INTERNAL (Gemini only) OR BOTH (Gemini + External)
-        # =====================================================================
+        # Build context from search results
+        context = "\n\n".join([
+            f"[{r.get('source', '').upper()}] {r.get('text', '')}\nSource: {r.get('url', '')}"
+            for r in search_results
+        ])
         
-        # Perform Search if Source is Both
-        if request.source == "both":
-            print(f"[REQUEST {request_id}] BOTH MODE: Using Gemini + Quran + Hadith APIs", file=sys.stdout, flush=True)
-            
-            # Extract keywords with YAKE (Issue #4 - P0: Fast, no API usage)
-            keyword_list = await extract_keywords_with_cache(request.query, model, use_gemini=False)
-            print(f"[REQUEST {request_id}] Using keywords: {keyword_list}", file=sys.stdout, flush=True)
-            
-            # Get selected Hadith collections
-            selected_collections = request.hadith_collection or [
-                "eng-bukhari",
-                "eng-muslim",
-                "eng-abudawud",
-                "eng-tirmidhi",
-                "eng-nasai",
-                "eng-ibnmajah"
-            ]
-            
-            # Create search tasks with concurrency limit (Issue #3 - P0)
-            semaphore = asyncio.Semaphore(5)  # Limit to 5 concurrent requests
-            
-            async def search_with_semaphore(keyword):
-                async with semaphore:
-                    return await search_hadith_async(
-                        keyword,
-                        collections=selected_collections,
-                        max_per_collection=1
-                    )
-            
-            # Execute searches concurrently with timeout (Issue #1 - P0: Reduced to 6s)
-            try:
-                quran_task = search_quran_async(", ".join(keyword_list), max_results=3)
-                hadith_tasks = [search_with_semaphore(kw) for kw in keyword_list]
-                
-                search_timeout = 6  # seconds (Issue #1 - P0: Changed from 8 to 6)
-                search_results = await asyncio.wait_for(
-                    asyncio.gather(quran_task, *hadith_tasks, return_exceptions=True),
-                    timeout=search_timeout
-                )
-                
-                # Process Quran results
-                if isinstance(search_results[0], Exception):
-                    print(f"[REQUEST {request_id}] Quran search failed: {search_results[0]}", file=sys.stderr, flush=True)
-                    quran_results = []
-                else:
-                    quran_results = search_results[0]
-                    print(f"[REQUEST {request_id}] Found {len(quran_results)} Quran verses", file=sys.stdout, flush=True)
-                
-                # Process Hadith results
-                all_hadith_results = []
-                for idx, result in enumerate(search_results[1:], 1):
-                    if isinstance(result, Exception):
-                        print(f"[REQUEST {request_id}] Hadith search {idx} failed: {result}", file=sys.stderr, flush=True)
-                    elif result:
-                        all_hadith_results.extend(result)
-                
-                # Remove duplicate hadiths
-                seen = set()
-                unique_hadiths = []
-                for hadith in all_hadith_results:
-                    key = (hadith.get('book', ''), hadith.get('hadithnumber', ''))
-                    if key not in seen:
-                        seen.add(key)
-                        unique_hadiths.append(hadith)
-                
-                print(f"[REQUEST {request_id}] Found {len(unique_hadiths)} unique hadiths", file=sys.stdout, flush=True)
-                
-            except asyncio.TimeoutError:
-                print(f"[REQUEST {request_id}] Search timed out after {search_timeout}s", file=sys.stderr, flush=True)
-                quran_results = []
-                unique_hadiths = []
-            
-            # Build context from search results
-            if quran_results:
-                context_text += "\n Quran Verses:\n"
-                for verse in quran_results:
-                    # Validate verse number (Issue #18 - P3)
-                    verse_num = verse.get('number')
-                    surah_num = verse.get('surahNumber')
-                    verse_in_surah = verse.get('numberInSurah')
-                    if isinstance(verse_num, int) and 1 <= verse_num <= 6236 and surah_num and verse_in_surah:
-                        context_text += f"- {verse['text']} (Surah {verse['surah']} {verse_in_surah})\n"
-                        citations.append({
-                            "title": f"Quran {verse['surah']}:{verse_in_surah}",
-                            "url": f"https://quran.com/{surah_num}:{verse_in_surah}"
-                        })
-            
-            if unique_hadiths:
-                context_text += f"\n Hadiths (Found {len(unique_hadiths)}):\n"
-                for hadith in unique_hadiths:
-                    context_text += (
-                        f"- {hadith['text']} "
-                        f"({hadith['source']}, Hadith #{hadith['hadithnumber']})\n"
-                    )
-                    citations.append({
-                        "title": f"{hadith['source']} - Hadith {hadith['hadithnumber']}",
-                        "url": hadith['citation_url']
-                    })
-        elif request.source == "internal":
-            print(f"[REQUEST {request_id}] INTERNAL MODE: Using only Gemini API (NO external sources)", file=sys.stdout, flush=True)
-        
-        # Construct Gemini prompt based on source selection
-        base_instruction = """
-You are an Islamic Guidance AI assistant. Provide helpful, empathetic Islamic perspective
-to the user's question with wisdom from Islamic teachings.
-"""
-        
-        if request.source == "internal":
-            prompt = f"{base_instruction}\nUser Query: \"{request.query}\"\nUse your internal knowledge of Islamic teachings to provide guidance."
-        else:  # both
-            prompt = f"{base_instruction}\nUser Query: \"{request.query}\"\n\nCONTEXT:\n{context_text}\n\nCombine context with your knowledge."
-        
-        prompt += """
+        # Generate AI response using Gemini
+        prompt = f"""Based on these Islamic teachings, provide clear and compassionate guidance.
 
-RESPONSE FORMAT:
-If the query is NOT related to Islamic guidance, return:
-{ "error": "This question is not related to Islamic guidance." }
+Question: {request.query}
 
-Otherwise return JSON:
-{
-  "answer": "Your detailed, compassionate guidance here...",
-  "citations": []
-}
-"""
+Relevant Islamic Sources:
+{context}
+
+Instructions:
+1. Provide practical guidance based ONLY on the sources above
+2. Include proper citations with [Quran X:Y] or [Hadith - Collection]
+3. Be compassionate and supportive
+4. Keep response concise (3-4 paragraphs max)
+
+Guidance:"""
         
-        # Generate response with JSON format
-        response = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
+        # Call Gemini API
+        model = get_gemini_model()
+        if not model:
+             raise HTTPException(status_code=503, detail="AI model not available")
+
+        response = model.generate_content(prompt)
         
-        response_text = response.text.strip()
+        # Format citations
+        citations = [
+            {
+                'title': r.get('id', ''),
+                'url': r.get('url', ''),
+                'score': r.get('score', 1.0),
+                'source': r.get('source', '')
+            }
+            for r in search_results
+        ]
         
-        # Clean up JSON response
-        if response_text.startswith("```"):
-            response_text = response_text[7:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
+        print(f"[API {request_id}] Response generated successfully", file=sys.stdout, flush=True)
         
-        data = json.loads(response_text.strip())
+        return {
+            'answer': response.text,
+            'citations': citations,
+            'search_method': 'semantic' if request.use_semantic else 'keyword'
+        }
         
-        # Merge citations for "both" mode
-        if "answer" in data and request.source == "both":
-            existing_urls = {c.get("url") for c in data.get("citations", [])}
-            for citation in citations:
-                if citation["url"] not in existing_urls:
-                    data.setdefault("citations", []).append(citation)
-        
-        # Validate response size before returning (Issue #2 - P0)
-        data = validate_response_size(data)
-        
-        # Cache successful response (30 minutes)
-        try:
-            await cache.set(cache_key, data, ttl=1800)
-        except Exception as e:
-            print(f"[REQUEST {request_id}] Cache write error: {e}", file=sys.stderr, flush=True)
-        
-        print(f"[REQUEST {request_id}] Success - returning response", file=sys.stdout, flush=True)
-        print("="*80, file=sys.stdout, flush=True)
-        
-        return data
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"[REQUEST {request_id}] Error: {e}", file=sys.stderr, flush=True)
+        print(f"[API] Error: {e}", file=sys.stderr, flush=True)
+        import traceback
         traceback.print_exc()
-        
-        # Graceful degradation (Issue #19 - P3)
-        # Try to return cached response for same query
-        try:
-            fallback_key = f"guidance_response:{request.query}:*"
-            # In production, implement wildcard search or store last response
-        except:
-            pass
-        
-        error_msg = str(e).lower()
-        if "quota" in error_msg or "429" in error_msg:
-            raise HTTPException(status_code=429, detail="Rate limit exhausted")
-        
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)[:100]}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/quran/search")
 async def quran_search_endpoint(keyword: str):
@@ -1265,6 +1043,64 @@ async def test_keywords_endpoint(text: str):
     except Exception as e:
         print(f"[TEST KEYWORDS] Error: {e}", file=sys.stderr, flush=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/vector-search")
+async def vector_search_endpoint(request: VectorSearchRequest):
+    """
+    Vector search endpoint using Pinecone Inference.
+    
+    Args:
+        request: VectorSearchRequest with query, source, collections, limit, score_threshold
+    
+    Returns:
+        List of relevant verses/hadiths from vector database
+    """
+    try:
+        print(f"[VECTOR-SEARCH] Query: {request.query[:50]}...", file=sys.stdout, flush=True)
+        print(f"[VECTOR-SEARCH] Source: {request.source}, Limit: {request.limit}, Threshold: {request.score_threshold}", file=sys.stdout, flush=True)
+        
+        # Check if vector search engine is available
+        if vector_search_engine is None:
+            print("[VECTOR-SEARCH] Vector search service not available", file=sys.stderr, flush=True)
+            raise HTTPException(
+                status_code=503, 
+                detail="Vector search service is not available. Please check PINECONE_API_KEY configuration."
+            )
+        
+        # Prepare source filter (convert "both" to None)
+        source_filter = None if request.source == 'both' else request.source
+        
+        # Run in thread pool because SearchEngine.search is synchronous
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(
+            None, 
+            lambda: vector_search_engine.search(
+                query=request.query,
+                source_filter=source_filter,
+                collection_filter=request.collections,
+                top_k=request.limit,
+                score_threshold=request.score_threshold
+            )
+        )
+        
+        print(f"[VECTOR-SEARCH] Found {len(results)} results", file=sys.stdout, flush=True)
+        
+        return {
+            "success": True,
+            "results": results,
+            "query": request.query,
+            "count": len(results)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[VECTOR-SEARCH] Error: {e}", file=sys.stderr, flush=True)
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Vector search failed: {str(e)[:100]}"
+        )
 
 
 
@@ -1478,6 +1314,8 @@ async def run_endpoint_tests():
             status_code=500,
             detail=f"Error running tests: {str(e)[:100]}"
         )
+
+
 
 # =============================================================================
 # GEMINI MODEL MANAGEMENT ENDPOINTS

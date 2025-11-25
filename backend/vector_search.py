@@ -27,8 +27,8 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 INDEX_NAME = 'islamic-guidance'
-EMBEDDING_MODEL = 'models/text-embedding-004'
-EMBEDDING_DIMENSION = 768
+EMBEDDING_MODEL = 'llama-text-embed-v2'
+EMBEDDING_DIMENSION = 1024
 
 # Global connection cache
 _pinecone_index = None
